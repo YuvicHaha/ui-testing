@@ -1,0 +1,2798 @@
+-- Original Skido design, with a restrained Halloween trim and responsive resizing.
+-- Replace the original library with this file; keep existing CreateWindow / addPage calls.
+-- Decorations are passive, local to this window, and use no remote images or animation.
+local CoreGui=game:GetService("CoreGui")
+for _,gui in ipairs(CoreGui:GetChildren()) do
+    if gui.Name=="fu8rj82n" and gui:IsA("ScreenGui") then gui:Destroy() end
+end
+local Library={}
+local UIS=game:GetService("UserInputService")
+local HttpService=game:GetService("HttpService")
+local ConfigFolder="Skido"
+local PluginFolder=ConfigFolder.."/skido_plugin"
+local function HasFS()
+    return type(isfile)=="function"
+    and type(readfile)=="function"
+    and type(writefile)=="function"
+end
+local function FileExists(path)
+    if type(isfile)~="function" then return false end
+    local ok,result=pcall(isfile,path)
+    return ok and result==true
+end
+local function EnsureFolder(path)
+    if not HasFS() then return false end
+    if type(isfolder)=="function" then
+        local ok,exists=pcall(isfolder,path)
+        if not ok then return false end
+        if exists then return true end
+        if type(makefolder)~="function" then return false end
+        if not pcall(makefolder,path) then return false end
+        local checked,created=pcall(isfolder,path)
+        return checked and created==true
+    end
+    -- Some executors do not expose directory inspection.
+    if type(makefolder)=="function" then pcall(makefolder,path) end
+    return true
+end
+local function SetupFolder()
+    return EnsureFolder(ConfigFolder)
+end
+local function SetupPluginFolder()
+    return SetupFolder() and EnsureFolder(PluginFolder)
+end
+local function CleanName(name)
+    name=tostring(name or "")
+    name=name:gsub("[^%w_%- ]","")
+    name=name:gsub("^%s+","")
+    name=name:gsub("%s+$","")
+    return name~="" and name or "Default"
+end
+local function ConfigPath(name)
+    return ConfigFolder.."/"..CleanName(name)..".json"
+end
+local function ColorToTable(c)
+    if typeof(c)~="Color3" then return nil end
+    return {
+        __type="Color3",
+        R=c.R,
+        G=c.G,
+        B=c.B
+    }
+end
+local function TableToColor(v)
+    if typeof(v)=="Color3" then return v end
+    if type(v)~="table"
+    or v.__type~="Color3" then
+        return nil
+    end
+return Color3.new(math.clamp(tonumber(v.R) or 1,0,1), math.clamp(tonumber(v.G) or 1,0,1), math.clamp(tonumber(v.B) or 1,0,1))
+end
+local function SerializeBind(bind)
+    if typeof(bind)~="EnumItem" then return nil end
+    if bind.EnumType==Enum.KeyCode then return "KeyCode|"..bind.Name end
+    if bind.EnumType==Enum.UserInputType then return "UserInputType|"..bind.Name end
+    return nil
+end
+local function DeserializeBind(value)
+    if type(value)~="string" then return nil end
+    local typ,name=value:match("^([^|]+)|(.+)$")
+    if typ=="KeyCode" then
+local ok,result=pcall(function() return Enum.KeyCode[name] end)
+        if ok and result then return result end
+    elseif typ=="UserInputType" then
+local ok,result=pcall(function() return Enum.UserInputType[name] end)
+        if ok and result then return result end
+    end
+    return nil
+end
+local function GetConfigFiles()
+    local files={}
+    if not SetupFolder()
+    or type(listfiles)~="function" then
+        return files
+    end
+local ok,result=pcall(function() return listfiles(ConfigFolder) end)
+    if not ok or type(result)~="table" then return files end
+    for _,path in ipairs(result) do
+        local filename=tostring(path):match("([^/\\]+)%.json$")
+        if filename and filename~="settings" then table.insert(files,filename) end
+    end
+table.sort(files,function(a,b) return a:lower()<b:lower() end)
+    return files
+end
+local function GetPluginFiles()
+    local files={}
+    if not SetupPluginFolder()
+    or type(listfiles)~="function" then
+        return files
+    end
+local ok,result=pcall(function() return listfiles(PluginFolder) end)
+    if not ok or type(result)~="table" then return files end
+    for _,path in ipairs(result) do
+        path=tostring(path)
+        local lower=path:lower()
+        if lower:sub(-4)==".lua" or lower:sub(-4)==".txt" then table.insert(files,path) end
+    end
+table.sort(files,function(a,b) return a:lower()<b:lower() end)
+    return files
+end
+local function PluginFileName(path)
+    return tostring(path):match("([^/\\]+)%.[^%.]+$") or tostring(path)
+end
+function Library:CreateWindow(windowname,windowinfo)
+    local Gui=Instance.new("ScreenGui")
+    local alive=true
+    local BindCapture=nil
+    local connections={}
+    local function Connect(signal,callback,owner)
+        local connection=signal:Connect(function(...)
+            if alive and (not owner or owner.Parent) then callback(...) end
+        end)
+        connections[connection]=true
+        if owner then
+            owner.Destroying:Once(function()
+                connection:Disconnect()
+                connections[connection]=nil
+            end)
+        end
+        return connection
+    end
+    Gui.Destroying:Once(function()
+        alive=false
+        for connection in pairs(connections) do connection:Disconnect() end
+        table.clear(connections)
+    end)
+    local function OnRelease(input,callback)
+        local connection
+        connection=Connect(input.Changed,function()
+            if input.UserInputState==Enum.UserInputState.End then
+                connection:Disconnect()
+                connections[connection]=nil
+                callback()
+            end
+        end)
+    end
+    local Frame=Instance.new("Frame")
+    local Scale=Instance.new("UIScale")
+    local Corner=Instance.new("UICorner")
+    local Dash=Instance.new("Frame")
+    local DashCorner=Instance.new("UICorner")
+    local Tabs=Instance.new("ScrollingFrame")
+    local TabLayout=Instance.new("UIListLayout")
+    local Pages=Instance.new("Frame")
+    local PagesCorner=Instance.new("UICorner")
+    local Folder=Instance.new("Folder")
+    local Title=Instance.new("TextLabel")
+    local ResetButton=Instance.new("TextButton")
+    local Credits=Instance.new("TextButton")
+    local CreditIcon=Instance.new("ImageLabel")
+    local CreditText=Instance.new("TextLabel")
+    Gui.Name="fu8rj82n"
+    Gui.Parent=CoreGui
+    Gui.ResetOnSpawn=false
+    Gui.ZIndexBehavior=Enum.ZIndexBehavior.Global
+    Frame.Parent=Gui
+    Frame.BackgroundColor3=Color3.fromRGB(20,20,20)
+    Frame.BorderSizePixel=0
+    Frame.Position=UDim2.new(.27,0,.29,0)
+    Frame.Size=UDim2.new(0,455,0,300)
+    Frame.Active=true
+    Scale.Scale=1.1
+    Scale.Parent=Frame
+    Corner.CornerRadius=UDim.new(0,7)
+    Corner.Parent=Frame
+    Dash.Parent=Frame
+    Dash.BackgroundColor3=Color3.fromRGB(15,15,15)
+    Dash.BorderSizePixel=0
+    Dash.Position=UDim2.new(.018,0,.168,0)
+    Dash.Size=UDim2.new(0,115,0,238)
+    DashCorner.CornerRadius=UDim.new(0,6)
+    DashCorner.Parent=Dash
+    Tabs.Parent=Dash
+Tabs.BackgroundTransparency=1
+Tabs.BorderSizePixel=0
+Tabs.Position=UDim2.new(.03,0,.035,0)
+Tabs.Size=UDim2.new(0,108,1,-18)
+Tabs.CanvasSize=UDim2.new(0,0,0,0)
+Tabs.ScrollBarThickness=3
+Tabs.ScrollBarImageColor3=Color3.fromRGB(70,70,70)
+Tabs.ScrollBarImageTransparency=0.15
+Tabs.ScrollingDirection=Enum.ScrollingDirection.Y
+Tabs.VerticalScrollBarInset=Enum.ScrollBarInset.ScrollBar
+Tabs.AutomaticCanvasSize=Enum.AutomaticSize.Y
+Tabs.ElasticBehavior=Enum.ElasticBehavior.WhenScrollable
+Tabs.ClipsDescendants=true
+TabLayout.Parent=Tabs
+TabLayout.HorizontalAlignment=Enum.HorizontalAlignment.Center
+TabLayout.SortOrder=Enum.SortOrder.LayoutOrder
+TabLayout.Padding=UDim.new(0,6)
+    Pages.Parent=Frame
+    Pages.BackgroundColor3=Color3.fromRGB(15,15,15)
+    Pages.BorderSizePixel=0
+    Pages.Position=UDim2.new(.277,0,.168,0)
+    Pages.Size=UDim2.new(0,319,0,238)
+    PagesCorner.CornerRadius=UDim.new(0,6)
+    PagesCorner.Parent=Pages
+    Folder.Parent=Pages
+    Folder.Name="PageFolder"
+    Title.Parent=Frame
+    Title.BackgroundTransparency=1
+    Title.Position=UDim2.new(.043,0,.028,0)
+    Title.Size=UDim2.new(0,112,0,33)
+    Title.Font=Enum.Font.GothamSemibold
+    Title.Text=windowname or "UI"
+    Title.TextColor3=Color3.new(1,1,1)
+    Title.TextSize=14
+    Title.TextXAlignment=Enum.TextXAlignment.Left
+    ResetButton.Parent=Frame
+    ResetButton.BackgroundColor3=Color3.fromRGB(30,30,30)
+    ResetButton.BorderSizePixel=0
+    ResetButton.Position=UDim2.new(.30,0,.05,0)
+    ResetButton.Size=UDim2.new(0,40,0,22)
+    ResetButton.Font=Enum.Font.GothamSemibold
+    ResetButton.Text="reset"
+    ResetButton.TextColor3=Color3.fromRGB(185,185,185)
+    ResetButton.TextSize=9
+    ResetButton.AutoButtonColor=false
+    ResetButton.ZIndex=50
+    local ResetCorner=Instance.new("UICorner")
+    ResetCorner.CornerRadius=UDim.new(0,5)
+    ResetCorner.Parent=ResetButton
+    local ResetStroke=Instance.new("UIStroke")
+    ResetStroke.Color=Color3.fromRGB(45,45,45)
+    ResetStroke.Transparency=.15
+    ResetStroke.Parent=ResetButton
+    --// SEARCH
+    local SearchBox=Instance.new("TextBox")
+    local SearchCorner=Instance.new("UICorner")
+    local SearchStroke=Instance.new("UIStroke")
+    SearchBox.Parent=Frame
+    SearchBox.BackgroundColor3=Color3.fromRGB(15,15,15)
+    SearchBox.BorderSizePixel=0
+    SearchBox.Position=UDim2.new(.40,0,.045,0)
+    SearchBox.Size=UDim2.new(0,150,0,24)
+    SearchBox.Font=Enum.Font.GothamSemibold
+    SearchBox.PlaceholderText="Search..."
+    SearchBox.PlaceholderColor3=Color3.fromRGB(100,100,100)
+    SearchBox.Text=""
+    SearchBox.TextColor3=Color3.new(1,1,1)
+    SearchBox.TextSize=10
+    SearchBox.ClearTextOnFocus=false
+    SearchBox.TextXAlignment=Enum.TextXAlignment.Left
+    SearchBox.ZIndex=50
+    SearchCorner.CornerRadius=UDim.new(0,5)
+    SearchCorner.Parent=SearchBox
+    SearchStroke.Color=Color3.fromRGB(35,35,35)
+    SearchStroke.Transparency=.15
+    SearchStroke.Parent=SearchBox
+    local SearchPadding=Instance.new("UIPadding")
+    SearchPadding.PaddingLeft=UDim.new(0,8)
+    SearchPadding.PaddingRight=UDim.new(0,8)
+    SearchPadding.Parent=SearchBox
+    --// CREDITS
+    Credits.Parent=Frame
+    Credits.BackgroundTransparency=1
+    Credits.Position=UDim2.new(.885,0,.05,0)
+    Credits.Size=UDim2.new(0,38,0,22)
+    Credits.AutoButtonColor=false
+    Credits.Text=""
+    CreditIcon.Parent=Credits
+    CreditIcon.BackgroundTransparency=1
+    CreditIcon.Size=UDim2.new(0,38,0,21)
+    CreditIcon.Image="rbxassetid://4384401360"
+    CreditIcon.ScaleType=Enum.ScaleType.Fit
+    CreditText.Parent=Credits
+    CreditText.BackgroundTransparency=1
+    CreditText.Position=UDim2.new(1.45,0,-.32,0)
+    CreditText.Size=UDim2.new(0,145,0,33)
+    CreditText.Font=Enum.Font.GothamSemibold
+    CreditText.Text=windowinfo or "UI Made by Bytes#0001"
+    CreditText.TextColor3=Color3.new(1,1,1)
+    CreditText.TextSize=9
+    CreditText.TextTransparency=1
+CreditIcon.MouseEnter:Connect(function() CreditText.TextTransparency=0 CreditIcon.ImageColor3=Color3.fromRGB(137,246,255) end)
+CreditIcon.MouseLeave:Connect(function() CreditText.TextTransparency=1 CreditIcon.ImageColor3=Color3.new(1,1,1) end)
+    --// MAIN DRAG
+    local dragging=false
+    local dragInput
+    local dragStart
+    local startPos
+    Frame.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+            if SearchBox:IsFocused() then return end
+            if Frame:GetAttribute("Resizing") then return end
+            dragging=true
+            dragStart=i.Position
+            startPos=Frame.Position
+OnRelease(i,function() dragging=false end)
+        end
+    end)
+Frame.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then dragInput=i end end)
+    Connect(UIS.InputChanged,function(i)
+        if i==dragInput and dragging then
+            local d=i.Position-dragStart
+Frame.Position=UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
+        end
+    end)
+SearchBox.Focused:Connect(function() dragging=false end)
+    --// EDGE / CORNER RESIZE (mouse and touch)
+    Frame:SetAttribute("Resizing",false)
+    do
+        local pointer=nil
+        local edge=nil
+        local startPointer=nil
+        local startSize=nil
+        local startPosition=nil
+        local startScale=1
+        local function StopResize()
+            pointer=nil
+            edge=nil
+            Frame:SetAttribute("Resizing",false)
+        end
+        local function MakeHandle(name,anchor,position,size,zindex)
+            local Handle=Instance.new("TextButton")
+            Handle.Name=name
+            Handle.BackgroundTransparency=1
+            Handle.BorderSizePixel=0
+            Handle.AnchorPoint=anchor
+            Handle.Position=position
+            Handle.Size=size
+            Handle.Text=""
+            Handle.AutoButtonColor=false
+            Handle.Selectable=false
+            Handle.ZIndex=zindex
+            Handle.Parent=Frame
+            Connect(Handle.InputBegan,function(i)
+                if pointer then return end
+                if i.UserInputType~=Enum.UserInputType.MouseButton1
+                and i.UserInputType~=Enum.UserInputType.Touch then return end
+                dragging=false
+                pointer=i
+                edge=name
+                startPointer=i.Position
+                startScale=math.max(Scale.Scale,.01)
+                startSize=Vector2.new(Frame.Size.X.Offset,Frame.Size.Y.Offset)
+                startPosition=Frame.Position
+                Frame:SetAttribute("Resizing",true)
+                OnRelease(i,function() if pointer==i then StopResize() end end)
+            end,Handle)
+        end
+        -- Edges end before the larger corner targets; nothing covers a control.
+        MakeHandle("ResizeLeft",Vector2.new(0,0),UDim2.new(0,0,0,14),UDim2.new(0,5,1,-28),99)
+        MakeHandle("ResizeRight",Vector2.new(1,0),UDim2.new(1,0,0,14),UDim2.new(0,5,1,-28),99)
+        MakeHandle("ResizeTop",Vector2.new(0,0),UDim2.new(0,14,0,0),UDim2.new(1,-28,0,5),99)
+        MakeHandle("ResizeBottom",Vector2.new(0,1),UDim2.new(0,14,1,0),UDim2.new(1,-28,0,5),99)
+        MakeHandle("ResizeTopLeft",Vector2.new(0,0),UDim2.new(0,0,0,0),UDim2.fromOffset(14,14),100)
+        MakeHandle("ResizeTopRight",Vector2.new(1,0),UDim2.new(1,0,0,0),UDim2.fromOffset(14,14),100)
+        MakeHandle("ResizeBottomLeft",Vector2.new(0,1),UDim2.new(0,0,1,0),UDim2.fromOffset(14,14),100)
+        MakeHandle("ResizeBottomRight",Vector2.new(1,1),UDim2.new(1,0,1,0),UDim2.fromOffset(14,14),100)
+        Connect(UIS.InputChanged,function(i)
+            if not pointer or not edge then return end
+            local mouse=pointer.UserInputType==Enum.UserInputType.MouseButton1
+                and i.UserInputType==Enum.UserInputType.MouseMovement
+            if not mouse and i~=pointer then return end
+            local delta=(i.Position-startPointer)/startScale
+            local left=edge:find("Left",1,true)~=nil
+            local right=edge:find("Right",1,true)~=nil
+            local top=edge:find("Top",1,true)~=nil
+            local bottom=edge:find("Bottom",1,true)~=nil
+            local width=startSize.X
+            local height=startSize.Y
+            if left or right then
+                width=math.clamp(startSize.X+(left and -delta.X or delta.X),455,900)
+            end
+            if top or bottom then
+                height=math.clamp(startSize.Y+(top and -delta.Y or delta.Y),300,650)
+            end
+            -- Use the clamped size to keep the opposite edges stationary.
+            local dx=left and (startSize.X-width)*startScale or 0
+            local dy=top and (startSize.Y-height)*startScale or 0
+            Frame.Position=UDim2.new(startPosition.X.Scale,startPosition.X.Offset+dx,
+                startPosition.Y.Scale,startPosition.Y.Offset+dy)
+            Frame.Size=UDim2.fromOffset(width,height)
+        end)
+        Connect(UIS.InputEnded,function(i) if i==pointer then StopResize() end end)
+        Connect(UIS.WindowFocusReleased,StopResize)
+        Connect(Frame:GetPropertyChangedSignal("Visible"),function()
+            if not Frame.Visible then StopResize() end
+        end)
+        Connect(Scale:GetPropertyChangedSignal("Scale"),StopResize)
+    end
+    --// MINIMIZE
+    local Min=Instance.new("TextButton")
+    local MinCorner=Instance.new("UICorner")
+    Min.Parent=Frame
+    Min.BackgroundColor3=Color3.fromRGB(30,30,30)
+    Min.Position=UDim2.new(.78,0,.05,0)
+    Min.Size=UDim2.new(0,30,0,22)
+    Min.Font=Enum.Font.GothamBold
+    Min.Text="-"
+    Min.TextColor3=Color3.new(1,1,1)
+    Min.TextSize=14
+    Min.ZIndex=50
+    MinCorner.CornerRadius=UDim.new(0,5)
+    MinCorner.Parent=Min
+    --// FLOAT
+    local Float=Instance.new("TextButton")
+    local FloatCorner=Instance.new("UICorner")
+    local FloatStroke=Instance.new("UIStroke")
+    Float.Parent=Gui
+    Float.BackgroundColor3=Color3.fromRGB(15,15,15)
+    Float.Position=UDim2.new(.05,0,.2,0)
+    Float.Size=UDim2.new(0,65,0,35)
+    Float.Font=Enum.Font.GothamBold
+    Float.Text="Skido"
+    Float.TextColor3=Color3.fromRGB(137,246,255)
+    Float.TextSize=12
+    Float.Visible=false
+    Float.Active=true
+    FloatCorner.CornerRadius=UDim.new(0,6)
+    FloatCorner.Parent=Float
+    FloatStroke.Color=Color3.fromRGB(35,35,35)
+    FloatStroke.Parent=Float
+    local fd,fi,fs,fp
+    local floatMoved=false
+    Float.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+            fd=true
+            floatMoved=false
+            fs=i.Position
+            fp=Float.Position
+OnRelease(i,function() fd=false end)
+        end
+    end)
+Float.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then fi=i end end)
+    Connect(UIS.InputChanged,function(i)
+        if i==fi and fd then
+            local d=i.Position-fs
+            if d.Magnitude>5 then floatMoved=true end
+Float.Position=UDim2.new(fp.X.Scale, fp.X.Offset+d.X, fp.Y.Scale, fp.Y.Offset+d.Y)
+        end
+    end)
+    local visible=true
+Min.MouseButton1Click:Connect(function() visible=false Frame.Visible=false Float.Visible=true end)
+Float.MouseButton1Click:Connect(function() if not floatMoved then visible=true Frame.Visible=true Float.Visible=false end end)
+    Connect(UIS.InputBegan,function(i,gp)
+        if gp or BindCapture or UIS:GetFocusedTextBox() then return end
+        if i.KeyCode==Enum.KeyCode.Semicolon then
+            if not Frame.Visible then
+                visible=true
+                Frame.Visible=true
+                Float.Visible=false
+            end
+            SearchBox:CaptureFocus()
+            SearchBox.CursorPosition=#SearchBox.Text+1
+            return
+        end
+        if i.KeyCode==Enum.KeyCode.RightShift then
+            visible=not visible
+            Frame.Visible=visible
+            Float.Visible=false
+        end
+    end)
+    --// REGISTRY
+    local AllElements={}
+    local PageTabs={}
+    local ConfigEntries={}
+    local PluginConfigEntries={}
+    local ResetEntries={}
+    local LoadedPlugins={}
+    local PluginLoading={}
+    local PluginTabOrder=0
+    local CurrentPlugin=nil
+    --// PERFORMANCE / UI SCALE
+    local PerformanceMode=false
+    local UIRefreshQueued=false
+    local PendingCanvasUpdates={}
+    local UIScaleValue=1.1
+    local function QueueCanvasUpdate(fn)
+        if not alive then return end
+        if not PerformanceMode then
+            task.defer(function() if alive then fn() end end)
+            return
+        end
+        PendingCanvasUpdates[fn]=true
+        if UIRefreshQueued then return end
+        UIRefreshQueued=true
+        task.delay(.06,function()
+            UIRefreshQueued=false
+            local pending=PendingCanvasUpdates
+            PendingCanvasUpdates={}
+            if not alive then return end
+            for callback in pairs(pending) do pcall(callback) end
+        end)
+    end
+    --// RESPONSIVE LAYOUT
+    -- Keep every original measurement at 455 x 300. Extra width goes to content,
+    -- not to a global scale, so text, toggles and hit targets stay crisp.
+    local ResponsiveRows=setmetatable({}, {__mode="k"})
+    local function RowWidth()
+        return 304+math.max(0,Frame.Size.X.Offset-455)
+    end
+    local function SetRowHeight(row,height)
+        ResponsiveRows[row]=true
+        row.Size=UDim2.fromOffset(RowWidth(),height)
+    end
+    local function UpdateWindowLayout()
+        if not alive then return end
+        local extraWidth=math.max(0,Frame.Size.X.Offset-455)
+        local contentHeight=math.max(238,Frame.Size.Y.Offset-62)
+        Dash.Position=UDim2.fromOffset(8.19,50.4)
+        Dash.Size=UDim2.fromOffset(115,contentHeight)
+        Tabs.Position=UDim2.fromOffset(3.45,8.33)
+        Tabs.Size=UDim2.new(0,108,1,-9)
+        Pages.Position=UDim2.fromOffset(126.035,50.4)
+        Pages.Size=UDim2.fromOffset(319+extraWidth,contentHeight)
+        Title.Position=UDim2.fromOffset(19.565,8.4)
+        ResetButton.Position=UDim2.fromOffset(136.5,15)
+        SearchBox.Position=UDim2.fromOffset(182,13.5)
+        SearchBox.Size=UDim2.fromOffset(150+extraWidth,24)
+        Min.Position=UDim2.fromOffset(354.9+extraWidth,15)
+        Credits.Position=UDim2.fromOffset(402.675+extraWidth,15)
+        for row in pairs(ResponsiveRows) do
+            if row.Parent then
+                row.Size=UDim2.fromOffset(RowWidth(),row.Size.Y.Offset)
+            end
+        end
+        for _,page in ipairs(Folder:GetChildren()) do
+            if page:IsA("ScrollingFrame") then
+                page.Position=UDim2.fromOffset(0,7.14)
+                page.Size=UDim2.new(1,-3,1,-13)
+            end
+        end
+        QueueCanvasUpdate(function()
+            for _,page in ipairs(Folder:GetChildren()) do
+                if page:IsA("ScrollingFrame") then
+                    local layout=page:FindFirstChildOfClass("UIListLayout")
+                    if layout then
+                        page.CanvasSize=UDim2.fromOffset(0,
+                            math.max(layout.AbsoluteContentSize.Y+12,page.AbsoluteSize.Y))
+                    end
+                end
+            end
+        end)
+    end
+    Connect(Frame:GetPropertyChangedSignal("Size"),UpdateWindowLayout)
+
+    -- Floating pickers follow their swatches through resizing, dragging and scrolling.
+    -- Their original color mapping/callbacks are untouched.
+    local function TrackPicker(anchor,panel,owner,onHide)
+        local page=owner.Parent
+        local function Hide()
+            if not panel.Parent then return end
+            if panel.Visible then panel.Visible=false end
+            onHide()
+        end
+        local function Position()
+            if not panel.Parent or not anchor.Parent or not owner.Parent then return end
+            if not Frame.Visible or not owner.Visible or (page and not page.Visible) then
+                Hide()
+                return
+            end
+            local p=anchor.AbsolutePosition-Gui.AbsolutePosition
+            local size=panel.AbsoluteSize
+            local viewport=Gui.AbsoluteSize
+            local x=p.X-120
+            local y=p.Y+anchor.AbsoluteSize.Y+4
+            if y+size.Y>viewport.Y-4 then y=p.Y-size.Y-4 end
+            panel.Position=UDim2.fromOffset(
+                math.clamp(x,4,math.max(4,viewport.X-size.X-4)),
+                math.clamp(y,4,math.max(4,viewport.Y-size.Y-4)))
+        end
+        local function Refresh() if panel.Visible then Position() end end
+        Connect(anchor:GetPropertyChangedSignal("AbsolutePosition"),Refresh,owner)
+        Connect(anchor:GetPropertyChangedSignal("AbsoluteSize"),Refresh,owner)
+        Connect(Gui:GetPropertyChangedSignal("AbsoluteSize"),Refresh,owner)
+        Connect(panel:GetPropertyChangedSignal("Visible"),Refresh,owner)
+        Connect(Frame:GetPropertyChangedSignal("Visible"),Refresh,owner)
+        Connect(owner:GetPropertyChangedSignal("Visible"),Refresh,owner)
+        if page and page:IsA("GuiObject") then
+            Connect(page:GetPropertyChangedSignal("Visible"),Refresh,owner)
+            if page:IsA("ScrollingFrame") then
+                Connect(page:GetPropertyChangedSignal("CanvasPosition"),Refresh,owner)
+            end
+        end
+        return Position
+    end
+
+    --// HALLOWEEN TRIM
+    -- Only empty outer margins are decorated. No full-window overlay or input hooks.
+    do
+        local amber=Color3.fromRGB(192,113,58)
+        local webColor=Color3.fromRGB(133,119,109)
+        local Trim=Instance.new("Folder")
+        Trim.Name="HalloweenTrim"
+        Trim.Parent=Frame
+        local Border=Instance.new("UIStroke")
+        Border.Name="HalloweenOutline"
+        Border.Color=amber
+        Border.Thickness=1
+        Border.Transparency=.78
+        Border.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
+        Border.Parent=Frame
+        local function Shape(name,parent,position,size,color,transparency,radius)
+            local part=Instance.new("Frame")
+            part.Name=name
+            part.BackgroundColor3=color
+            part.BackgroundTransparency=transparency
+            part.BorderSizePixel=0
+            part.Position=position
+            part.Size=size
+            part.Active=false
+            part.Selectable=false
+            part.ZIndex=2
+            part.Parent=parent
+            if radius then
+                local rounding=Instance.new("UICorner")
+                rounding.CornerRadius=UDim.new(0,radius)
+                rounding.Parent=part
+            end
+            return part
+        end
+        local function Line(parent,a,b,opacity)
+            local d=b-a
+            local line=Shape("Silk",parent,UDim2.fromOffset((a.X+b.X)/2,(a.Y+b.Y)/2),
+                UDim2.fromOffset(d.Magnitude,.65),webColor,opacity)
+            line.AnchorPoint=Vector2.new(.5,.5)
+            line.Rotation=math.deg(math.atan2(d.Y,d.X))
+        end
+        local function Web(name,right)
+            local origin=right and UDim2.new(1,-2,0,2) or UDim2.fromOffset(2,2)
+            local web=Shape(name,Trim,origin,UDim2.fromOffset(16,16),webColor,1)
+            if right then web.AnchorPoint=Vector2.new(1,0) end
+            local function Point(x,y) return Vector2.new(right and 16-x or x,y) end
+            for _,tip in ipairs({Vector2.new(16,0),Vector2.new(14.4,7.2),
+                Vector2.new(7.2,14.4),Vector2.new(0,16)}) do
+                Line(web,Point(0,0),Point(tip.X,tip.Y),.60)
+            end
+            for _,r in ipairs({.42,.76}) do
+                local knots={Vector2.new(16*r,0),Vector2.new(14.4*r,7.2*r),
+                    Vector2.new(7.2*r,14.4*r),Vector2.new(0,16*r)}
+                for n=1,#knots-1 do
+                    Line(web,Point(knots[n].X,knots[n].Y),
+                        Point(knots[n+1].X,knots[n+1].Y),.68)
+                end
+            end
+        end
+        Web("LeftWeb",false)
+        Web("RightWeb",true)
+        -- A tiny pumpkin silhouette in the existing bottom gutter; no emoji/assets.
+        local pumpkin=Shape("Pumpkin",Trim,UDim2.new(0,22,1,-11),
+            UDim2.fromOffset(13,9),amber,1)
+        Shape("Stem",pumpkin,UDim2.fromOffset(6,0),UDim2.fromOffset(2,3),
+            Color3.fromRGB(130,134,99),.28,1)
+        Shape("LeftLobe",pumpkin,UDim2.fromOffset(0,2),UDim2.fromOffset(7,7),amber,.34,4)
+        Shape("RightLobe",pumpkin,UDim2.fromOffset(6,2),UDim2.fromOffset(7,7),amber,.34,4)
+        Shape("CenterLobe",pumpkin,UDim2.fromOffset(4,1),UDim2.fromOffset(5,8),amber,.18,4)
+    end
+    --// INDEPENDENT LEFT ACTIVE PANEL
+    local TogglePanel=Instance.new("Frame")
+    local ToggleCorner=Instance.new("UICorner")
+    local ToggleStroke=Instance.new("UIStroke")
+    local ToggleTitle=Instance.new("TextLabel")
+    local ToggleList=Instance.new("Frame")
+    local ToggleLayout=Instance.new("UIListLayout")
+    TogglePanel.Name="NOVA_ActiveToggles"
+    TogglePanel.Parent=Gui
+    TogglePanel.BackgroundColor3=Color3.fromRGB(15,15,15)
+    TogglePanel.BorderSizePixel=0
+    TogglePanel.Position=UDim2.new(0,12,0,0.5)
+    TogglePanel.Size=UDim2.new(0,210,0,45)
+    TogglePanel.Active=true
+    TogglePanel.Visible=true
+    TogglePanel.ZIndex=200
+    ToggleCorner.CornerRadius=UDim.new(0,7)
+    ToggleCorner.Parent=TogglePanel
+    ToggleStroke.Color=Color3.fromRGB(35,35,35)
+    ToggleStroke.Transparency=.1
+    ToggleStroke.Parent=TogglePanel
+    ToggleTitle.Parent=TogglePanel
+    ToggleTitle.BackgroundTransparency=1
+    ToggleTitle.Position=UDim2.new(0,12,0,6)
+    ToggleTitle.Size=UDim2.new(1,-24,0,22)
+    ToggleTitle.Font=Enum.Font.GothamSemibold
+    ToggleTitle.Text="Active Toggles"
+    ToggleTitle.TextColor3=Color3.fromRGB(137,246,255)
+    ToggleTitle.TextSize=12
+    ToggleTitle.TextXAlignment=Enum.TextXAlignment.Left
+    ToggleTitle.ZIndex=201
+    ToggleList.Parent=TogglePanel
+    ToggleList.BackgroundTransparency=1
+    ToggleList.Position=UDim2.new(0,10,0,34)
+    ToggleList.Size=UDim2.new(1,-20,1,-40)
+    ToggleList.ZIndex=201
+    ToggleLayout.Parent=ToggleList
+    ToggleLayout.SortOrder=Enum.SortOrder.LayoutOrder
+    ToggleLayout.Padding=UDim.new(0,5)
+    local ActiveToggleRows={}
+    local function UpdateTogglePanel()
+        local count=0
+        for _,row in pairs(ActiveToggleRows) do
+            if row and row.Parent then count+=1 end
+        end
+        local height=45
+        if count>0 then height=45+(count*29)+8 end
+        TogglePanel.Size=UDim2.new(0,210,0,height)
+    end
+    --// PANEL DRAG ONLY
+    local tpDragging=false
+    local tpInput
+    local tpStart
+    local tpPos
+    ToggleTitle.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch then
+            tpDragging=true
+            tpStart=i.Position
+            tpPos=TogglePanel.Position
+OnRelease(i,function() tpDragging=false end)
+        end
+    end)
+ToggleTitle.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then tpInput=i end end)
+    Connect(UIS.InputChanged,function(i)
+        if i==tpInput and tpDragging then
+            local d=i.Position-tpStart
+TogglePanel.Position=UDim2.new(tpPos.X.Scale, tpPos.X.Offset+d.X, tpPos.Y.Scale, tpPos.Y.Offset+d.Y)
+        end
+    end)
+    local HighlightedObject=nil
+    local HighlightedColor=nil
+    local HighlightToken=0
+    local SearchToken=0
+    local function ClearHighlight()
+        HighlightToken+=1
+        if HighlightedObject
+        and HighlightedObject.Parent
+        and HighlightedColor then
+            HighlightedObject.BackgroundColor3=HighlightedColor
+        end
+        HighlightedObject=nil
+        HighlightedColor=nil
+    end
+    local function Register(obj,name,page,typ)
+        if not obj then return end
+        table.insert(AllElements,{
+            Object=obj,
+            Name=tostring(name or ""),
+            Page=page,
+            Type=typ
+        })
+    end
+    local AutoLoadSetter=nil
+    local PersistSettings=nil
+    local ConfigKeyCounts={}
+    local LoadedConfigData=nil
+    local function Clone(value)
+        if type(value)~="table" then return value end
+        local copy={}
+        for key,item in pairs(value) do copy[key]=Clone(item) end
+        return copy
+    end
+    local function RegisterWindowConfig(name,typ,getter,setter,pageName,plugin)
+        -- Management fields must not overwrite the config being loaded.
+        if pageName=="Config" and name=="Auto Load" then AutoLoadSetter=setter return end
+        if pageName=="Config" and name=="" then return end
+        local base=HttpService:JSONEncode({pageName,typ,tostring(name or "")})
+        local scope=plugin and plugin.File or "main"
+        local counterKey=scope.."|"..base
+        ConfigKeyCounts[counterKey]=(ConfigKeyCounts[counterKey] or 0)+1
+        local key=base.."#"..ConfigKeyCounts[counterKey]
+        local okDefault,defaultValue=pcall(getter)
+        local entry={
+            Name=tostring(name or ""),
+            Key=key,
+            Type=typ,
+            Get=getter,
+            Set=setter,
+            Default=Clone(defaultValue),
+            Plugin=plugin
+        }
+        table.insert(ResetEntries,entry)
+        if plugin then
+table.insert(PluginConfigEntries, entry)
+        else
+table.insert(ConfigEntries, entry)
+        end
+        -- Autoload may finish before callers build their own pages.
+        if not plugin and LoadedConfigData and type(LoadedConfigData.Values)=="table" then
+            local saved=LoadedConfigData.Values[key] or LoadedConfigData.Values[entry.Name]
+            if type(saved)=="table" and (saved.Type==nil or saved.Type==typ) and saved.Value~=nil then
+                pcall(setter,Clone(saved.Value))
+            end
+        end
+    end
+    --// SEARCH
+    local function Search(query)
+        SearchToken+=1
+        local token=SearchToken
+        query=tostring(query or "")
+        query=query:lower()
+        query=query:gsub("^%s+","")
+        query=query:gsub("%s+$","")
+        if query=="" then
+            ClearHighlight()
+            return
+        end
+        for _,data in ipairs(AllElements) do
+            if data.Object and data.Object.Parent and data.Page and data.Page.Parent and data.Name:lower():find(query,1,true) then
+                local page=data.Page
+                if not page or not page.Parent then return end
+                for _,p in ipairs(Folder:GetChildren()) do
+                    if p:IsA("ScrollingFrame") then p.Visible=false end
+                end
+                page.Visible=true
+                for name,tab in pairs(PageTabs) do
+                    if name==page.Name then
+                        tab.TextTransparency=0
+                        tab.BackgroundColor3=Color3.fromRGB(25,25,25)
+                    else
+                        tab.TextTransparency=.3
+                        tab.BackgroundColor3=Color3.fromRGB(15,15,15)
+                    end
+                end
+                task.defer(function()
+                    task.wait()
+                    if not alive or token~=SearchToken then return end
+                    if not data.Object
+                    or not data.Object.Parent then
+                        return
+                    end
+                    local y=
+                        data.Object.AbsolutePosition.Y
+                        -page.AbsolutePosition.Y
+                        +page.CanvasPosition.Y
+                        -12
+local maxY=math.max(0, page.AbsoluteCanvasSize.Y-page.AbsoluteSize.Y)
+page.CanvasPosition=Vector2.new(0, math.clamp(y,0,maxY))
+                    ClearHighlight()
+                    HighlightToken+=1
+                    local ht=HighlightToken
+                    HighlightedObject=data.Object
+                    HighlightedColor=data.Object.BackgroundColor3
+                    data.Object.BackgroundColor3=
+                        Color3.fromRGB(35,70,75)
+                    task.delay(.55,function()
+                        if ht~=HighlightToken then return end
+                        if HighlightedObject==data.Object
+                        and HighlightedObject.Parent
+                        and HighlightedColor then
+                            HighlightedObject.BackgroundColor3=
+                                HighlightedColor
+                        end
+                        HighlightedObject=nil
+                        HighlightedColor=nil
+                    end)
+                end)
+                return
+            end
+        end
+        ClearHighlight()
+    end
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function() Search(SearchBox.Text) end)
+    --// PAGES
+    local PageYep={}
+    function PageYep:addPage(
+        pagename,
+        scrollsize,
+        visible,
+        elementspacing
+)
+        local pageName=tostring(pagename or "Page")
+        local baseName=pageName
+        local suffix=2
+        while PageTabs[pageName] do
+            pageName=baseName.." "..suffix
+            suffix+=1
+        end
+        local Tab=Instance.new("TextButton")
+        local TC=Instance.new("UICorner")
+        local Home=Instance.new("ScrollingFrame")
+        local Layout=Instance.new("UIListLayout")
+        Tab.Name="Tab"
+        Tab.Parent=Tabs
+        Tab.BackgroundColor3=Color3.fromRGB(15,15,15)
+        Tab.BorderSizePixel=0
+        Tab.Size=UDim2.new(0,108,0,27)
+        Tab.AutoButtonColor=false
+        Tab.Font=Enum.Font.GothamSemibold
+        Tab.Text=pageName
+        Tab.TextColor3=Color3.new(1,1,1)
+        Tab.TextSize=11
+        Tab.TextTransparency=visible and 0 or .3
+        TC.CornerRadius=UDim.new(0,7)
+        TC.Parent=Tab
+        Home.Name=pageName
+        Home.Parent=Folder
+        Home.Active=true
+        Home.BackgroundTransparency=1
+        Home.BorderSizePixel=0
+        Home.Position=UDim2.new(0,0,.03,0)
+        Home.Size=UDim2.new(1,-3,0,225)
+        Home.ScrollBarThickness=4
+        Home.ScrollBarImageColor3=Color3.fromRGB(70,70,70)
+        Home.CanvasSize=UDim2.new(0,0,0,0)
+        Home.ScrollingDirection=Enum.ScrollingDirection.Y
+        Home.VerticalScrollBarInset=Enum.ScrollBarInset.ScrollBar
+        Home.ClipsDescendants=true
+        Home.Visible=visible==true
+        Layout.Parent=Home
+        Layout.HorizontalAlignment=Enum.HorizontalAlignment.Center
+        Layout.SortOrder=Enum.SortOrder.LayoutOrder
+        Layout.Padding=UDim.new(0,elementspacing or 6)
+        local function UpdateCanvas()
+            if not alive or not Home.Parent then return end
+            local h=Layout.AbsoluteContentSize.Y+12
+            Home.CanvasSize=UDim2.new(
+                0,
+                0,
+                0,
+math.max(h, Home.AbsoluteSize.Y)
+)
+        end
+Layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateCanvas)
+Home:GetPropertyChangedSignal("AbsoluteSize"):Connect(UpdateCanvas)
+        task.defer(UpdateCanvas)
+        PageTabs[pageName]=Tab
+        if pageName~="Config" then
+            PluginTabOrder+=1
+            Tab.LayoutOrder=PluginTabOrder
+        end
+        local function ShowPage()
+            ClearHighlight()
+            SearchToken+=1
+            for _,p in ipairs(Folder:GetChildren()) do
+                if p:IsA("ScrollingFrame") then p.Visible=false end
+            end
+            Home.Visible=true
+            for _,t in ipairs(Tabs:GetChildren()) do
+                if t:IsA("GuiButton") then
+                    t.TextTransparency=
+                        t==Tab and 0 or .3
+                    t.BackgroundColor3=
+                        t==Tab
+                        and Color3.fromRGB(25,25,25)
+                        or Color3.fromRGB(15,15,15)
+                end
+            end
+            task.defer(UpdateCanvas)
+        end
+        Tab.MouseButton1Click:Connect(ShowPage)
+Tab.MouseEnter:Connect(function() if Tab.TextTransparency==0 then Tab.BackgroundColor3= Color3.fromRGB(10,10,10) end end)
+Tab.MouseLeave:Connect(function() Tab.BackgroundColor3= Tab.TextTransparency==0 and Color3.fromRGB(25,25,25) or Color3.fromRGB(15,15,15) end)
+        local pagePlugin=CurrentPlugin
+        local Elements={}
+        local function RegisterConfig(name,typ,getter,setter)
+            RegisterWindowConfig(name,typ,getter,setter,pageName,pagePlugin)
+        end
+        Elements.__Tab=Tab
+        Elements.__Page=Home
+        Elements.__Show=ShowPage
+        if visible==true then ShowPage() end
+        local function RegisterElement(obj,name,typ)
+            Register(obj,name,Home,typ)
+        end
+        --// LABEL
+        function Elements:addLabel(name,info)
+            local o=type(name)=="table" and name or nil
+            if o then name=o.Text or "" info=o.Info or o.Description or "" end
+            local H=Instance.new("Frame")
+            local C=Instance.new("UICorner")
+            local T=Instance.new("TextLabel")
+            local I=Instance.new("TextLabel")
+            H.Parent=Home H.BackgroundColor3=Color3.fromRGB(17,17,17) H.BorderSizePixel=0 SetRowHeight(H,30)
+            C.CornerRadius=UDim.new(0,5) C.Parent=H
+            T.Parent=H T.BackgroundTransparency=1 T.Size=UDim2.new(1,0,0,17) T.Font=Enum.Font.GothamSemibold T.Text=name or "" T.TextColor3=Color3.new(1,1,1) T.TextSize=11
+            I.Parent=H I.BackgroundTransparency=1 I.Position=UDim2.new(0,0,.55,0) I.Size=UDim2.new(1,0,0,11) I.Font=Enum.Font.GothamSemibold I.Text=info or "" I.TextColor3=Color3.new(1,1,1) I.TextTransparency=.3 I.TextSize=9
+            RegisterElement(H,name,"Label")
+            return H,T,I
+        end
+        --// BUTTON
+        function Elements:addButton(name,callback)
+            local H=Instance.new("Frame")
+            local B=Instance.new("TextButton")
+            local C=Instance.new("UICorner")
+            H.Parent=Home
+            H.BackgroundColor3=Color3.fromRGB(17,17,17)
+            H.BorderSizePixel=0
+            SetRowHeight(H,30)
+            C.CornerRadius=UDim.new(0,5)
+            C.Parent=H
+            B.Parent=H
+            B.BackgroundTransparency=1
+            B.Size=UDim2.new(1,0,1,0)
+            B.AutoButtonColor=false
+            B.Font=Enum.Font.GothamSemibold
+            B.Text=name or ""
+            B.TextColor3=Color3.new(1,1,1)
+            B.TextSize=11
+B.MouseButton1Click:Connect(function() pcall(callback or function() end) end)
+            RegisterElement(H,name,"Button")
+            return H,B
+        end
+        --// TOGGLE
+        function Elements:addToggle(name,a,b,c,d,e,f)
+            local keybind,default,callback,picker,color,colorcb,keybindMode
+            local keybindPicker=false
+            local keybindRequiresToggle=false
+            local holdToggle=false
+            local toggleMode="Toggle"
+            local hasBind=false
+            if type(a)=="table" then
+                local o=a
+                name=o.Text or name
+                keybind=o.Keybind
+                keybindPicker=o.KeybindPicker==true
+                hasBind=typeof(keybind)=="EnumItem" or keybindPicker or o.KeybindMode==true or o.KeybindRequiresToggle==true
+                default=o.Default==true
+                callback=o.Callback or function() end
+                picker=o.ColorPicker==true or o.Picker==true
+                color=o.Color or Color3.new(1,1,1)
+                colorcb=o.ColorCallback or function() end
+                keybindMode=o.KeybindMode==true
+                keybindRequiresToggle=o.KeybindRequiresToggle==true
+                holdToggle=o.HoldToggle==true
+                if o.Mode=="Hold" then toggleMode="Hold" end
+            elseif typeof(a)=="EnumItem" then
+                keybind=a
+                hasBind=true
+                callback=b or function() end
+                if typeof(c)=="boolean" then
+                    default=c
+                    picker=d or false
+                    color=e
+                    colorcb=f
+                else
+                    default=false
+                    picker=c or false
+                    color=d
+                    colorcb=e
+                end
+            elseif typeof(a)=="boolean" then
+                default=a
+                callback=b or function() end
+                picker=c or false
+                color=d
+                colorcb=e
+            else
+                default=false
+                callback=a or function() end
+                picker=b or false
+                color=c
+                colorcb=d
+            end
+            if type(a)~="table" then
+                if typeof(f)=="boolean" and picker==false then
+                    keybindMode=f
+                elseif typeof(e)=="boolean"
+                and picker==false
+                and color==nil then
+                    keybindMode=e
+                elseif typeof(d)=="boolean"
+                and picker==false
+                and color==nil then
+                    keybindMode=d
+                else
+                    keybindMode=false
+                end
+            end
+            if typeof(a)=="EnumItem"
+            and typeof(c)=="boolean"
+            and d==nil
+            and e==nil
+            and f==nil then
+                keybindMode=c
+                default=false
+                picker=false
+                color=Color3.new(1,1,1)
+                colorcb=function() end
+            end
+            default=default or false
+            color=color or Color3.new(1,1,1)
+            colorcb=colorcb or function() end
+            keybindMode=keybindMode==true
+            keybindRequiresToggle=keybindRequiresToggle==true
+            holdToggle=holdToggle==true
+            local H=Instance.new("Frame")
+            local HC=Instance.new("UICorner")
+            local T=Instance.new("TextLabel")
+            local TB=Instance.new("TextButton")
+            local TF=Instance.new("Frame")
+            local TFC=Instance.new("UICorner")
+            local Ball=Instance.new("Frame")
+            local BC=Instance.new("UICorner")
+            local Bind=Instance.new("TextButton")
+            local BindC=Instance.new("UICorner")
+            local function ControlConnect(signal,callback)
+                return Connect(signal,callback,H)
+            end
+            H.Parent=Home
+            H.BackgroundColor3=Color3.fromRGB(17,17,17)
+            H.BorderSizePixel=0
+            SetRowHeight(H,30)
+            H.ClipsDescendants=false
+            HC.CornerRadius=UDim.new(0,5)
+            HC.Parent=H
+            T.Parent=H
+            T.BackgroundTransparency=1
+            T.Position=UDim2.new(0,7.296,0,0)
+            T.Size=UDim2.new(1,holdToggle and (picker and -217 or -192) or (((hasBind or UIS.TouchEnabled) and picker) and -171 or -159),0,30)
+            T.TextTruncate=Enum.TextTruncate.AtEnd
+            T.Font=Enum.Font.GothamSemibold
+            T.Text=name or ""
+            T.TextColor3=Color3.fromRGB(235,235,235)
+            T.TextSize=11
+            T.TextXAlignment=Enum.TextXAlignment.Left
+            Bind.Parent=H
+            Bind.BackgroundColor3=Color3.fromRGB(25,25,25)
+            Bind.Position=UDim2.new(1,holdToggle and (picker and -202.32 or -176.32) or (picker and -155.04 or -130.72),0,5)
+            Bind.Size=UDim2.new(0,holdToggle and 45 or 52,0,20)
+            Bind.Font=Enum.Font.GothamSemibold
+            Bind.TextColor3=Color3.fromRGB(150,150,150)
+            Bind.TextSize=10
+            Bind.Visible=hasBind or UIS.TouchEnabled
+            BindC.CornerRadius=UDim.new(0,4)
+            BindC.Parent=Bind
+            local ModeButton
+            local ModeMenu
+            local ToggleChoice
+            local HoldChoice
+            local SetMode
+            if holdToggle then
+                ModeButton=Instance.new("TextButton")
+                ModeButton.Parent=H
+                ModeButton.BackgroundColor3=Color3.fromRGB(25,25,25)
+                ModeButton.Position=UDim2.new(1,picker and -144.56 or -118.56,0,5)
+                ModeButton.Size=UDim2.new(0,43,0,20)
+                ModeButton.Font=Enum.Font.GothamSemibold
+                ModeButton.Text="Toggle"
+                ModeButton.TextColor3=Color3.fromRGB(150,150,150)
+                ModeButton.TextSize=9
+                ModeButton.AutoButtonColor=false
+                ModeButton.ZIndex=51
+                local MC=Instance.new("UICorner")
+                MC.CornerRadius=UDim.new(0,4)
+                MC.Parent=ModeButton
+                ModeMenu=Instance.new("Frame")
+                ModeMenu.Parent=H
+                ModeMenu.BackgroundColor3=Color3.fromRGB(25,25,25)
+                ModeMenu.Position=UDim2.new(1,picker and -144.56 or -118.56,0,28)
+                ModeMenu.Size=UDim2.new(0,43,0,48)
+                ModeMenu.Visible=false
+                ModeMenu.BorderSizePixel=0
+                ModeMenu.ZIndex=70
+                local MMC=Instance.new("UICorner")
+                MMC.CornerRadius=UDim.new(0,4)
+                MMC.Parent=ModeMenu
+                ToggleChoice=Instance.new("TextButton")
+                ToggleChoice.Parent=ModeMenu
+                ToggleChoice.BackgroundTransparency=1
+                ToggleChoice.Size=UDim2.new(1,0,0,24)
+                ToggleChoice.Font=Enum.Font.GothamSemibold
+                ToggleChoice.Text="Toggle"
+                ToggleChoice.TextColor3=Color3.new(1,1,1)
+                ToggleChoice.TextSize=9
+                ToggleChoice.ZIndex=71
+                HoldChoice=Instance.new("TextButton")
+                HoldChoice.Parent=ModeMenu
+                HoldChoice.BackgroundTransparency=1
+                HoldChoice.Position=UDim2.new(0,0,0,24)
+                HoldChoice.Size=UDim2.new(1,0,0,24)
+                HoldChoice.Font=Enum.Font.GothamSemibold
+                HoldChoice.Text="Hold"
+                HoldChoice.TextColor3=Color3.new(1,1,1)
+                HoldChoice.TextSize=9
+                HoldChoice.ZIndex=71
+            end
+            local currentBind=
+                (keybind and keybind~=Enum.KeyCode.Unknown)
+                and keybind
+                or nil
+            if UIS.TouchEnabled and not keybindPicker then
+                Bind.Text="Show"
+            elseif currentBind then
+Bind.Text=currentBind.Name:gsub("MouseButton", "MB")
+            else
+                Bind.Text="None"
+            end
+            TB.Parent=H
+            TB.BackgroundTransparency=1
+            TB.Position=UDim2.new(1,-60.8,0,0)
+            TB.Size=UDim2.new(0,60,0,30)
+            TB.AutoButtonColor=false
+            TF.Parent=TB
+            TF.BackgroundColor3=Color3.fromRGB(45,45,45)
+            TF.Position=UDim2.new(.28,0,0,5)
+            TF.Size=UDim2.new(0,35,0,20)
+            TFC.Parent=TF
+            TFC.CornerRadius=UDim.new(0,10)
+            Ball.Parent=TF
+            Ball.BackgroundColor3=Color3.new(1,1,1)
+            Ball.Position=
+                default
+                and UDim2.new(.46,0,0,4)
+                or UDim2.new(.1,0,0,4)
+            Ball.Size=UDim2.new(0,14,0,12)
+            BC.CornerRadius=UDim.new(1,0)
+            BC.Parent=Ball
+            local armed=default
+            local active=default
+            if keybindMode then active=false end
+            local closePicker
+            local Row
+            local function UpdateSwitchVisual()
+                local on=(keybindMode or keybindRequiresToggle) and armed or active
+                TF.BackgroundColor3=
+                    on
+                    and Color3.fromRGB(55,115,120)
+                    or Color3.fromRGB(45,45,45)
+                Ball.BackgroundColor3=
+                    on
+                    and Color3.fromRGB(245,255,255)
+                    or Color3.fromRGB(175,175,175)
+                Ball:TweenPosition(
+UDim2.new(on and .46 or .1, 0, 0, 4),
+                    "Out",
+                    "Linear",
+                    .1,
+                    true
+)
+            end
+            local function RemoveRightRow()
+                if Row then
+                    Row:Destroy()
+                    Row=nil
+                end
+                ActiveToggleRows[H]=nil
+                UpdateTogglePanel()
+            end
+            local function AddRightRow()
+                if Row and Row.Parent then return end
+                Row=Instance.new("TextLabel")
+                Row.Parent=ToggleList
+                Row.BackgroundColor3=Color3.fromRGB(20,20,20)
+                Row.BorderSizePixel=0
+                Row.Size=UDim2.new(1,0,0,24)
+                Row.Font=Enum.Font.GothamSemibold
+                Row.TextColor3=Color3.new(1,1,1)
+                Row.TextSize=8
+                Row.TextXAlignment=Enum.TextXAlignment.Left
+                Row.ZIndex=202
+                local RC=Instance.new("UICorner")
+                RC.CornerRadius=UDim.new(0,4)
+                RC.Parent=Row
+                local RP=Instance.new("UIPadding")
+                RP.PaddingLeft=UDim.new(0,6)
+                RP.Parent=Row
+                ActiveToggleRows[H]=Row
+                UpdateTogglePanel()
+            end
+            H.Destroying:Once(function()
+                if active then pcall(callback,false) active=false end
+                if BindCapture==Bind then BindCapture=nil end
+                RemoveRightRow()
+            end)
+            local function UpdateRightRow()
+                local shouldShow=
+                    (keybindMode or keybindRequiresToggle)
+                    and armed
+                    or active
+                if not shouldShow then
+                    RemoveRightRow()
+                    return
+                end
+                AddRightRow()
+                if Row then
+                    local stateText=
+                        active
+                        and "ON"
+                        or "OFF"
+                    local bindText=
+                        currentBind
+and currentBind.Name:gsub("MouseButton", "MB")
+                        or "None"
+                    Row.Text=
+                        (name or "Toggle")
+                        .."  ["
+                        ..bindText
+                        .."] "
+                        ..stateText
+                    Row.TextColor3=
+                        active
+and Color3.fromRGB(137, 246, 255)
+or Color3.fromRGB(170, 170, 170)
+                end
+            end
+            local function SetActive(v,callCallback)
+                v=v==true
+                local changed=active~=v
+                active=v
+                if callCallback~=false and changed then pcall(callback,active) end
+                UpdateRightRow()
+                UpdateSwitchVisual()
+            end
+            local function SetArmed(v,callCallback)
+                local previous=active
+                armed=v==true
+                if keybindRequiresToggle and not keybindMode then active=armed end
+                if not armed then active=false end
+                if callCallback~=false and previous~=active then pcall(callback,active) end
+                if not armed and closePicker then closePicker() end
+                UpdateRightRow()
+                UpdateSwitchVisual()
+                task.defer(UpdateCanvas)
+            end
+            local function UpdateNormal()
+                Ball:TweenPosition(
+UDim2.new(active and .46 or .1, 0, 0, 4),
+                    "Out",
+                    "Linear",
+                    .1,
+                    true
+)
+                if not active and closePicker then closePicker() end
+                UpdateRightRow()
+                UpdateSwitchVisual()
+                pcall(callback,active)
+                task.defer(UpdateCanvas)
+            end
+            local modeOpen=false
+            SetMode=function(mode)
+                local newMode=mode=="Hold" and "Hold" or "Toggle"
+                if toggleMode==newMode then
+                    ModeButton.Text=toggleMode
+                    ModeMenu.Visible=false
+                    modeOpen=false
+                    UpdateRightRow()
+                    UpdateSwitchVisual()
+                    return
+                end
+                toggleMode=newMode
+                if ModeButton then ModeButton.Text=toggleMode end
+                if ModeMenu then ModeMenu.Visible=false end
+                modeOpen=false
+                if active then SetActive(false,true) else UpdateRightRow() UpdateSwitchVisual() end
+            end
+            if ModeButton then
+                ModeButton.MouseButton1Click:Connect(function() modeOpen=not modeOpen ModeMenu.Visible=modeOpen SetRowHeight(H,modeOpen and 78 or 30) task.defer(UpdateCanvas) end)
+                ToggleChoice.MouseButton1Click:Connect(function() SetMode("Toggle") SetRowHeight(H,30) task.defer(UpdateCanvas) end)
+                HoldChoice.MouseButton1Click:Connect(function() SetMode("Hold") SetRowHeight(H,30) task.defer(UpdateCanvas) end)
+            end
+            ControlConnect(UIS.WindowFocusReleased,function()
+                if toggleMode=="Hold" and active then SetActive(false,true) end
+            end)
+            local mainPress=false
+            local mainInput=nil
+            TB.InputBegan:Connect(function(i)
+                if i.UserInputType~=Enum.UserInputType.MouseButton1
+                and i.UserInputType~=Enum.UserInputType.Touch then
+                    return
+                end
+                mainPress=true
+                mainInput=i
+                if keybindMode or keybindRequiresToggle then
+                    SetArmed(not armed,true)
+                elseif toggleMode=="Hold" then
+                    SetActive(true,true)
+                end
+            end)
+            ControlConnect(UIS.InputEnded,function(i)
+                if i.UserInputType~=Enum.UserInputType.MouseButton1
+                and i.UserInputType~=Enum.UserInputType.Touch then
+                    return
+                end
+                if not mainPress or i~=mainInput then return end
+                mainPress=false
+                if keybindMode or keybindRequiresToggle then
+                    -- Master toggle is always a normal on/off switch.
+                elseif toggleMode=="Hold" then
+                    SetActive(false,true)
+                else
+                    active=not active
+                    UpdateNormal()
+                end
+            end)
+            --// COLOR PICKER
+            if picker then
+                local CB=Instance.new("TextButton")
+                local CBC=Instance.new("UICorner")
+                local Panel=Instance.new("Frame")
+                local PC=Instance.new("UICorner")
+                local Canvas=Instance.new("ImageButton")
+                local Circle=Instance.new("Frame")
+                local CC=Instance.new("UICorner")
+                CB.Parent=H
+                CB.BackgroundColor3=color
+                CB.Position=UDim2.new(1,-94.24,0,5)
+                CB.Size=UDim2.new(0,20,0,20)
+                CB.Text=""
+                CB.ZIndex=50
+                CBC.CornerRadius=UDim.new(0,4)
+                CBC.Parent=CB
+                H.Destroying:Once(function() Panel:Destroy() end)
+                Panel.Parent=Gui
+                Panel.BackgroundColor3=Color3.fromRGB(25,25,25)
+                Panel.Position=UDim2.new(0,0,0,0)
+                Panel.Size=UDim2.new(0,296,0,115)
+                Panel.Visible=false
+                Panel.ZIndex=60
+                Panel.BorderSizePixel=0
+                Panel.Active=true
+                PC.CornerRadius=UDim.new(0,6)
+                PC.Parent=Panel
+                Canvas.Parent=Panel
+                Canvas.BackgroundTransparency=1
+                Canvas.Position=UDim2.new(0,8,0,8)
+                Canvas.Size=UDim2.new(1,-16,1,-16)
+                Canvas.Image="rbxassetid://143332548"
+                Canvas.ZIndex=61
+                Canvas.AutoButtonColor=false
+                Circle.Parent=Canvas
+                Circle.AnchorPoint=Vector2.new(.5,.5)
+                Circle.BackgroundColor3=color
+                Circle.BorderColor3=Color3.new(0,0,0)
+                Circle.BorderSizePixel=2
+                Circle.Size=UDim2.new(0,10,0,10)
+                Circle.ZIndex=62
+                Circle.Position=UDim2.new(.5,0,.5,0)
+                CC.CornerRadius=UDim.new(1,0)
+                CC.Parent=Circle
+                local open=false
+                closePicker=function()
+                    open=false
+                    Panel.Visible=false
+                    SetRowHeight(H,30)
+                    task.defer(UpdateCanvas)
+                end
+                local function PositionPicker()
+                    if not CB.Parent then return end
+                    local p=CB.AbsolutePosition-Gui.AbsolutePosition
+                    local y=p.Y+CB.AbsoluteSize.Y+4
+                    local x=p.X-120
+                    local vp=Gui.AbsoluteSize
+                    x=math.clamp(x,4,math.max(4,vp.X-300))
+                    y=math.clamp(y,4,math.max(4,vp.Y-120))
+                    Panel.Position=UDim2.fromOffset(x,y)
+                end
+                CB.MouseButton1Click:Connect(function()
+                    open=not open
+                    if open then
+                        PositionPicker()
+                        Panel.Visible=true
+                        Circle.BackgroundColor3=color
+                    else
+                        Panel.Visible=false
+                    end
+                    CB.BackgroundColor3=color
+                    SetRowHeight(H,30)
+                    task.defer(UpdateCanvas)
+                end)
+                local colorDrag=false
+                local colorInput=nil
+                TrackPicker(CB,Panel,H,function()
+                    open=false
+                    colorDrag=false
+                    colorInput=nil
+                end)
+                local function SetColor(i)
+                    local s=Canvas.AbsoluteSize
+                    local p=Canvas.AbsolutePosition
+                    if s.X<=0 or s.Y<=0 then return end
+local x=math.clamp((i.Position.X-p.X)/s.X, 0, 1)
+local y=math.clamp((i.Position.Y-p.Y)/s.Y, 0, 1)
+                    Circle.Position=UDim2.new(x,0,y,0)
+color=Color3.fromHSV(x, 1-y, 1)
+                    CB.BackgroundColor3=color
+                    Circle.BackgroundColor3=color
+                    pcall(colorcb,color)
+                end
+                Canvas.InputBegan:Connect(function(i)
+                    if i.UserInputType==
+                        Enum.UserInputType.MouseButton1
+                    or i.UserInputType==
+                        Enum.UserInputType.Touch then
+                        colorDrag=true
+                        colorInput=i
+                        SetColor(i)
+                    end
+                end)
+                ControlConnect(UIS.InputChanged,function(i)
+                    if colorDrag
+and colorInput and ((colorInput.UserInputType==Enum.UserInputType.MouseButton1 and i.UserInputType==Enum.UserInputType.MouseMovement) or i==colorInput) then
+                        SetColor(i)
+                    end
+                end)
+ControlConnect(UIS.InputEnded,function(i) if i==colorInput then colorDrag=false colorInput=nil end end)
+                RegisterConfig(
+                    name.."_Color",
+                    "Color3",
+                    function()
+                        return color
+                    end,
+                    function(v)
+                        local cc=TableToColor(v)
+                        if cc then
+                            color=cc
+                            CB.BackgroundColor3=color
+                            Circle.BackgroundColor3=color
+                            pcall(colorcb,color)
+                        end
+                    end
+)
+            end
+            --// TOUCH SHORTCUT
+            if UIS.TouchEnabled and not keybindPicker then
+                local ShortcutButton=nil
+                local ShortcutDragConn=nil
+                local function RemoveShortcut()
+                    if ShortcutDragConn then
+                        ShortcutDragConn:Disconnect()
+                        ShortcutDragConn=nil
+                    end
+                    if ShortcutButton then
+                        ShortcutButton:Destroy()
+                        ShortcutButton=nil
+                    end
+                    Bind:SetAttribute("Shown",false)
+                    Bind.Text="Show"
+                end
+                Bind.MouseButton1Click:Connect(function()
+                    if Bind:GetAttribute("Shown") then
+                        RemoveShortcut()
+                        return
+                    end
+                    Bind:SetAttribute("Shown",true)
+                    Bind.Text="Hide"
+                    local SB=Instance.new("TextButton")
+                    local SC=Instance.new("UICorner")
+                    ShortcutButton=SB
+                    H.Destroying:Once(function() if ShortcutButton==SB then RemoveShortcut() end end)
+                    SB.Parent=Gui
+                    SB.Name=(name or "Toggle").."_Shortcut"
+                    SB.Size=UDim2.new(0,78,0,30)
+                    SB.Position=UDim2.new(1,-90,0,.35)
+                    SB.Font=Enum.Font.GothamBold
+                    SB.Text=name or "Toggle"
+                    SB.TextSize=9
+                    SB.TextWrapped=true
+                    SB.BackgroundColor3=active
+                        and Color3.fromRGB(40,140,70)
+                        or Color3.fromRGB(30,30,30)
+                    SB.TextColor3=Color3.fromRGB(160,160,160)
+                    SB.ZIndex=250
+                    SB.Active=true
+                    SB.AutoButtonColor=false
+                    SC.CornerRadius=UDim.new(0,5)
+                    SC.Parent=SB
+                    --// SHORTCUT DRAG
+                    local dragging=false
+                    local moved=false
+                    local dragInput=nil
+                    local dragStart=nil
+                    local startPos=nil
+                    SB.InputBegan:Connect(function(i)
+                        if i.UserInputType==Enum.UserInputType.MouseButton1
+                        or i.UserInputType==Enum.UserInputType.Touch then
+                            dragging=true
+                            moved=false
+                            dragStart=i.Position
+                            startPos=SB.Position
+OnRelease(i,function() dragging=false end)
+                        end
+                    end)
+SB.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then dragInput=i end end)
+                    ShortcutDragConn=ControlConnect(UIS.InputChanged,function(i)
+                        if i==dragInput and dragging and ShortcutButton==SB then
+                            local d=i.Position-dragStart
+                            if math.abs(d.X)>5 or math.abs(d.Y)>5 then moved=true end
+SB.Position=UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
+                        end
+                    end)
+                    local shortcutPress=false
+                    local shortcutInput=nil
+                    SB.InputBegan:Connect(function(i)
+                        if i.UserInputType~=Enum.UserInputType.MouseButton1
+                        and i.UserInputType~=Enum.UserInputType.Touch then
+                            return
+                        end
+                        if moved or ShortcutButton~=SB then return end
+                        shortcutPress=true
+                        shortcutInput=i
+                        if keybindRequiresToggle and not keybindMode and not armed then return end
+                        if keybindMode then
+                            if armed and toggleMode=="Hold" then SetActive(true,true) end
+                        elseif toggleMode=="Hold" then
+                            SetActive(true,true)
+                        end
+                    end)
+                    ControlConnect(UIS.InputEnded,function(i)
+                        if i.UserInputType~=Enum.UserInputType.MouseButton1
+                        and i.UserInputType~=Enum.UserInputType.Touch then
+                            return
+                        end
+                        if not shortcutPress or i~=shortcutInput or ShortcutButton~=SB then return end
+                        shortcutPress=false
+                        if moved and toggleMode~="Hold" then return end
+                        if keybindRequiresToggle and not keybindMode and not armed then return end
+                        if keybindMode then
+                            if armed then
+                                if toggleMode=="Hold" then
+                                    SetActive(false,true)
+                                else
+                                    SetActive(not active,true)
+                                end
+                            end
+                        elseif toggleMode=="Hold" then
+                            SetActive(false,true)
+                        else
+                            active=not active
+                            UpdateNormal()
+                        end
+                        SB.BackgroundColor3=
+                            active
+                            and Color3.fromRGB(40,140,70)
+                            or Color3.fromRGB(30,30,30)
+                        SB.TextColor3=Color3.new(1,1,1)
+                    end)
+                end)
+            elseif hasBind then
+                local listening=false
+Bind.MouseButton1Click:Connect(function() Bind.Text="..." listening=true BindCapture=Bind end)
+                ControlConnect(UIS.InputBegan,function(i,gp)
+                    if BindCapture and BindCapture~=Bind then return end
+                    if listening and BindCapture==Bind then
+                        if i.UserInputType==
+                            Enum.UserInputType.Keyboard
+                        or i.UserInputType==
+                            Enum.UserInputType.MouseButton1
+                        or i.UserInputType==
+                            Enum.UserInputType.MouseButton2
+                        or i.UserInputType==
+                            Enum.UserInputType.MouseButton3 then
+                            if toggleMode=="Hold" and active then SetActive(false,true) end
+                            if i.KeyCode==
+                                Enum.KeyCode.Escape
+                            or i.KeyCode==
+                                Enum.KeyCode.Backspace then
+                                currentBind=nil
+                                Bind.Text="None"
+                            elseif i.UserInputType==
+                                Enum.UserInputType.Keyboard then
+                                currentBind=i.KeyCode
+                                Bind.Text=i.KeyCode.Name
+                            else
+                                currentBind=i.UserInputType
+                                Bind.Text=
+i.UserInputType.Name:gsub("MouseButton", "MB")
+                            end
+                            UpdateRightRow()
+                            listening=false
+                            BindCapture=nil
+                        end
+                    elseif not gp and not UIS:GetFocusedTextBox() and currentBind then
+                        local match=
+(currentBind.EnumType== Enum.KeyCode and i.KeyCode==currentBind)
+                            or
+(currentBind.EnumType== Enum.UserInputType and i.UserInputType== currentBind)
+                        if match then
+                            if keybindRequiresToggle and not keybindMode and not armed then return end
+                            if keybindMode then
+                                if armed then
+                                    if toggleMode=="Hold" then
+                                        SetActive(true,true)
+                                    else
+                                        SetActive(not active,true)
+                                    end
+                                end
+                            elseif toggleMode=="Hold" then
+                                SetActive(true,true)
+                            else
+                                active=not active
+                                UpdateNormal()
+                            end
+                        end
+                    end
+                end)
+            end
+            if hasBind and (not UIS.TouchEnabled or keybindPicker) then
+                ControlConnect(UIS.InputEnded,function(i)
+                    if toggleMode~="Hold" or not currentBind then return end
+                    local match=
+(currentBind.EnumType==Enum.KeyCode and i.KeyCode==currentBind)
+                        or
+(currentBind.EnumType==Enum.UserInputType and i.UserInputType==currentBind)
+                    if match then
+                        if keybindMode then
+                            if armed then SetActive(false,true) end
+                        else
+                            SetActive(false,true)
+                        end
+                    end
+                end)
+            end
+            if ModeButton then ModeButton.Text=toggleMode end
+            --// INITIAL STATE
+            if keybindMode then
+                active=false
+                pcall(callback,false)
+            elseif keybindRequiresToggle then
+                active=default
+                pcall(callback,active)
+            else
+                active=default
+                pcall(callback,active)
+            end
+            UpdateRightRow()
+            UpdateSwitchVisual()
+            RegisterElement(H,name,"Toggle")
+            RegisterConfig(
+                name,
+                "Toggle",
+                function()
+                    return {
+                        Enabled=armed,
+                        Active=active,
+                        Keybind=SerializeBind(currentBind) or false,
+                        KeybindMode=keybindMode,
+                        KeybindRequiresToggle=keybindRequiresToggle,
+                        ToggleMode=toggleMode,
+                        HoldToggle=holdToggle
+                    }
+                end,
+                function(v)
+                    if type(v)=="boolean" then
+                        armed=v
+                        if keybindMode or keybindRequiresToggle then
+                            active=keybindRequiresToggle and not keybindMode and v or false
+                        else
+                            active=v
+                        end
+                    elseif type(v)=="table" then
+                        armed=v.Enabled==true
+                        if holdToggle and (v.ToggleMode=="Hold" or v.ToggleMode=="Toggle") then
+                            toggleMode=v.ToggleMode
+                            if ModeButton then ModeButton.Text=toggleMode end
+                            if keybindMode and toggleMode=="Hold" and active then
+                                active=false
+                                pcall(callback,false)
+                            end
+                        end
+                        if v.Keybind==false then
+                            currentBind=nil
+                            if not UIS.TouchEnabled or keybindPicker then Bind.Text="None" end
+                        elseif v.Keybind~=nil then
+                            local newBind=
+DeserializeBind(v.Keybind)
+                            if newBind then
+                                currentBind=newBind
+                                if not UIS.TouchEnabled then
+                                    Bind.Text=
+currentBind.Name:gsub("MouseButton", "MB")
+                                end
+                            end
+                        end
+                        if keybindMode then
+                            active=
+                                v.Active==true
+                                and armed
+                        elseif keybindRequiresToggle then
+                            active=v.Active==true and armed
+                        else
+                            if v.Active~=nil then
+                                active=v.Active==true
+                            else
+                                active=armed
+                            end
+                        end
+                    end
+                    Ball:TweenPosition(
+UDim2.new(armed and .46 or .1, 0, 0, 4),
+                        "Out",
+                        "Linear",
+                        .1,
+                        true
+)
+                    pcall(callback,active)
+                    UpdateRightRow()
+                    UpdateSwitchVisual()
+                end
+)
+            return H
+        end
+        --// SLIDER
+        function Elements:addSlider(name,a,b,c,d)
+            local min,max,value,callback,rounding
+            local function finite(v,fallback)
+                v=tonumber(v)
+                if not v or v~=v or math.abs(v)==math.huge then return fallback end
+                return v
+            end
+            if type(a)=="table" then
+                local o=a
+                name=o.Text or name
+                min=finite(o.Min,0)
+                max=finite(o.Max,100)
+                value=tonumber(o.Default)
+                rounding=math.clamp(math.floor(finite(o.Rounding,0)),0,10)
+                callback=o.Callback or function() end
+            else
+                min=finite(a,0)
+                max=finite(b,100)
+                callback=c or function() end
+                value=tonumber(d)
+                rounding=0
+            end
+            if max<min then min,max=max,min end
+            local step=10^-rounding
+            local function roundValue(v)
+                v=finite(v,min)
+                v=math.clamp(v,min,max)
+                if rounding>0 then
+                    v=math.round(v/step)*step
+                    v=math.clamp(v,min,max)
+                else
+                    v=math.floor(v+0.5)
+                    v=math.clamp(v,min,max)
+                end
+                return v
+            end
+            value=roundValue(value or min)
+            local function formatValue(v)
+                if rounding<=0 then return tostring(math.floor(v+0.5)) end
+                local text=string.format("%."..rounding.."f",v)
+                text=text:gsub("(%..-)0+$","%1"):gsub("%.$","")
+                return text
+            end
+            local H=Instance.new("Frame")
+            local C=Instance.new("UICorner")
+            local T=Instance.new("TextLabel")
+            local B=Instance.new("TextButton")
+            local BC=Instance.new("UICorner")
+            local Trail=Instance.new("Frame")
+            local TC=Instance.new("UICorner")
+            local Knob=Instance.new("Frame")
+            local KC=Instance.new("UICorner")
+            local Num=Instance.new("TextBox")
+            local function ControlConnect(signal,callback)
+                return Connect(signal,callback,H)
+            end
+            H.Parent=Home
+            H.BackgroundColor3=Color3.fromRGB(17,17,17)
+            H.BorderSizePixel=0
+            SetRowHeight(H,30)
+            C.CornerRadius=UDim.new(0,5)
+            C.Parent=H
+            T.Parent=H
+            T.BackgroundTransparency=1
+            T.Position=UDim2.new(0,7.296,0,3)
+            T.Size=UDim2.new(1,-64,0,10)
+            T.TextTruncate=Enum.TextTruncate.AtEnd
+            T.Font=Enum.Font.GothamSemibold
+            T.Text=name or ""
+            T.TextColor3=Color3.new(1,1,1)
+            T.TextSize=11
+            T.TextXAlignment=Enum.TextXAlignment.Left
+            Num.Parent=H
+            Num.BackgroundTransparency=1
+            Num.Position=UDim2.new(1,-48.64,0,2)
+            Num.Size=UDim2.new(0,42,0,13)
+            Num.Font=Enum.Font.GothamSemibold
+            Num.Text=formatValue(value)
+            Num.TextColor3=Color3.fromRGB(235,235,235)
+            Num.TextSize=10
+            Num.TextEditable=true
+            Num.ZIndex=5
+            Num.TextXAlignment=Enum.TextXAlignment.Right
+            Num.ClearTextOnFocus=false
+            B.Parent=H
+            B.BackgroundColor3=Color3.fromRGB(5,5,5)
+            B.BorderSizePixel=0
+            B.Position=UDim2.new(0,8,0,19)
+            B.Size=UDim2.new(1,-16,0,7)
+            B.Text=""
+            B.AutoButtonColor=false
+            B.Active=true
+            BC.CornerRadius=UDim.new(0,4)
+            BC.Parent=B
+            Trail.Parent=B
+            Trail.BackgroundColor3=Color3.fromRGB(137,246,255)
+            Trail.Size=UDim2.new(0,1,1,0)
+            Trail.ZIndex=2
+            TC.CornerRadius=UDim.new(0,4)
+            TC.Parent=Trail
+            Knob.Parent=B
+            Knob.BackgroundColor3=Color3.fromRGB(235,235,235)
+            Knob.Size=UDim2.new(0,12,0,12)
+            Knob.AnchorPoint=Vector2.new(.5,.5)
+            Knob.Position=UDim2.new(0,0,.5,0)
+            Knob.ZIndex=4
+            KC.CornerRadius=UDim.new(1,0)
+            KC.Parent=Knob
+            local function Set(v,callCallback)
+                value=roundValue(v)
+                Num.Text=formatValue(value)
+                local p=max==min and 0 or (value-min)/(max-min)
+                p=math.clamp(p,0,1)
+                Trail.Size=UDim2.new(p,0,1,0)
+                Knob.Position=UDim2.new(p,0,.5,0)
+                if callCallback~=false then pcall(callback,value) end
+                task.defer(UpdateCanvas)
+            end
+            local moving=false
+            local moveInput=nil
+            local function UpdateFromX(x)
+                if B.AbsoluteSize.X<=0 then return end
+local p=math.clamp((x-B.AbsolutePosition.X)/B.AbsoluteSize.X, 0,1)
+                Set(min+(max-min)*p,true)
+            end
+B.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then moving=true moveInput=i UpdateFromX(i.Position.X) end end)
+-- The initiating pointer remains fixed until release.
+ControlConnect(UIS.InputChanged,function(i) if not moving or not moveInput then return end if (moveInput.UserInputType==Enum.UserInputType.MouseButton1 and i.UserInputType==Enum.UserInputType.MouseMovement) or i==moveInput then UpdateFromX(i.Position.X) end end)
+ControlConnect(UIS.InputEnded,function(i) if i==moveInput then moving=false moveInput=nil end end)
+            Num.FocusLost:Connect(function()
+local typed=tonumber((tostring(Num.Text):gsub("%s+","")))
+                if typed==nil then
+                    Num.Text=formatValue(value)
+                    return
+                end
+                Set(typed,true)
+            end)
+Num.Focused:Connect(function() task.defer(function() Num.CursorPosition=#Num.Text+1 end) end)
+            Set(value,false)
+            RegisterElement(H,name,"Slider")
+            RegisterConfig(
+                name,
+                "Slider",
+                function()
+                    return value
+                end,
+                function(v)
+                    Set(v,true)
+                end
+)
+            return H
+        end
+        --// TEXTBOX
+        function Elements:addTextBox(name,default,callback)
+            local o=type(default)=="table" and default or nil
+            if o then name=o.Text or name default=o.Default or "" callback=o.Callback end
+            callback=callback or function() end
+            local H=Instance.new("Frame") local C=Instance.new("UICorner") local T=Instance.new("TextLabel") local B=Instance.new("TextBox") local BC=Instance.new("UICorner")
+            H.Parent=Home H.BackgroundColor3=Color3.fromRGB(17,17,17) H.BorderSizePixel=0 SetRowHeight(H,30)
+            C.CornerRadius=UDim.new(0,5) C.Parent=H
+            T.Parent=H T.BackgroundTransparency=1 T.Position=UDim2.new(0,7.296,0,3) T.Size=UDim2.new(.75,-18,0,24) T.TextTruncate=Enum.TextTruncate.AtEnd T.Font=Enum.Font.GothamSemibold T.Text=name or "" T.TextColor3=Color3.new(1,1,1) T.TextSize=11 T.TextXAlignment=Enum.TextXAlignment.Left
+            B.Parent=H B.BackgroundColor3=Color3.fromRGB(5,5,5) B.AnchorPoint=Vector2.new(1,0) B.Position=UDim2.new(1,-5.56,0,5) B.Size=UDim2.new(.25,-1,0,20) B.Font=Enum.Font.GothamSemibold B.Text=tostring(default or "") B.TextColor3=Color3.new(1,1,1) B.TextSize=9 B.ClearTextOnFocus=false B.PlaceholderText=(o and o.Placeholder) or ""
+            BC.CornerRadius=UDim.new(0,5) BC.Parent=B
+            B.FocusLost:Connect(function() pcall(callback,B.Text) end)
+            RegisterElement(H,name,"TextBox")
+            RegisterConfig(name,"TextBox",function() return B.Text end,function(v) B.Text=tostring(v or "") pcall(callback,B.Text) end)
+            return H,B
+        end
+        --// DROPDOWN
+        function Elements:addDropdown(name,list,scrollsize,callback)
+            local o=type(list)=="table" and (list.Values~=nil or list.Text~=nil or list.Callback~=nil or list.Default~=nil or list.MultiSelect~=nil) and list or nil
+            if o then name=o.Text or name list=o.Values or {} callback=o.Callback scrollsize=o.ScrollSize end
+            list=list or {} callback=callback or function() end
+            local multi=o and o.MultiSelect==true or false
+            local H=Instance.new("Frame") local C=Instance.new("UICorner") local T=Instance.new("TextLabel") local B=Instance.new("TextButton") local Icon=Instance.new("ImageLabel") local Panel=Instance.new("Frame") local PC=Instance.new("UICorner") local Scroll=Instance.new("ScrollingFrame") local Layout=Instance.new("UIListLayout")
+            H.Parent=Home H.BackgroundColor3=Color3.fromRGB(17,17,17) H.BorderSizePixel=0 SetRowHeight(H,30) H.ClipsDescendants=false
+            C.CornerRadius=UDim.new(0,5) C.Parent=H
+            T.Parent=H T.BackgroundTransparency=1 T.Position=UDim2.new(0,7.296,0,2) T.Size=UDim2.new(1,-84,0,26) T.TextTruncate=Enum.TextTruncate.AtEnd T.Font=Enum.Font.GothamSemibold T.Text=name or "" T.TextColor3=Color3.new(1,1,1) T.TextSize=11 T.TextXAlignment=Enum.TextXAlignment.Left
+            B.Parent=H B.BackgroundTransparency=1 B.Size=UDim2.new(1,0,0,30) B.Text="" B.AutoButtonColor=false
+            Icon.Parent=B Icon.BackgroundTransparency=1 Icon.Position=UDim2.new(1,-36.48,.18,0) Icon.Size=UDim2.new(0,24,0,17) Icon.Image="rbxassetid://3944690667"
+            Panel.Parent=H Panel.BackgroundColor3=Color3.fromRGB(17,17,17) Panel.Position=UDim2.new(0,0,0,34) Panel.Size=UDim2.new(1,0,0,115) Panel.BorderSizePixel=0 Panel.Visible=false Panel.ZIndex=100 Panel.Active=true
+            PC.CornerRadius=UDim.new(0,6) PC.Parent=Panel
+            Scroll.Parent=Panel Scroll.BackgroundTransparency=1 Scroll.BorderSizePixel=0 Scroll.Position=UDim2.new(0,4,0,5) Scroll.Size=UDim2.new(1,-8,1,-10) Scroll.ScrollBarThickness=3 Scroll.ScrollBarImageColor3=Color3.fromRGB(70,70,70) Scroll.ZIndex=101
+            Layout.Parent=Scroll Layout.HorizontalAlignment=Enum.HorizontalAlignment.Center Layout.SortOrder=Enum.SortOrder.LayoutOrder Layout.Padding=UDim.new(0,5)
+            local open=false local selected=nil local values={} local selections={} local optionButtons={}
+            local function canvas() Scroll.CanvasSize=UDim2.new(0,0,0,Layout.AbsoluteContentSize.Y+8) end
+            local function close() open=false Panel.Visible=false SetRowHeight(H,30) Icon.ImageColor3=Color3.new(1,1,1) task.defer(UpdateCanvas) end
+            local function visual(btn,v)
+                local yes=multi and selections[v] or selected==v
+                btn.BackgroundColor3=yes and Color3.fromRGB(137,246,255) or Color3.fromRGB(15,15,15)
+                btn.TextColor3=yes and Color3.fromRGB(10,10,10) or Color3.new(1,1,1)
+            end
+            local function get()
+                if not multi then return selected end
+                local r={} for _,v in ipairs(values) do if selections[v] then r[v]=true end end return r
+            end
+            local function refreshVisuals()
+                local names={}
+                for _,v in ipairs(values) do
+                    if multi and selections[v] then table.insert(names,tostring(v)) end
+                    if optionButtons[v] then visual(optionButtons[v],v) end
+                end
+                if multi then T.Text=#names>0 and table.concat(names,", ") or tostring(name or "")
+                else T.Text=selected~=nil and tostring(selected) or tostring(name or "") end
+            end
+            local function set(v,fire)
+                if multi then
+                    selections={}
+                    for _,x in ipairs(values) do
+                        if type(v)=="table" then
+                            if v[x]==true or v[tostring(x)]==true or table.find(v,x) then selections[x]=true end
+                        elseif v~=nil and v~=false and tostring(x)==tostring(v) then selections[x]=true end
+                    end
+                else
+                    selected=nil
+                    if v~=nil and v~=false then
+                        for _,x in ipairs(values) do
+                            if x==v or tostring(x)==tostring(v) then selected=x break end
+                        end
+                    end
+                end
+                refreshVisuals()
+                if fire then pcall(callback,get()) end
+            end
+            B.MouseButton1Click:Connect(function() open=not open Panel.Visible=open SetRowHeight(H,open and 149 or 30) Icon.ImageColor3=open and Color3.fromRGB(137,246,255) or Color3.new(1,1,1) task.defer(UpdateCanvas) end)
+            local function build(valuesList)
+                values={} optionButtons={} local seen={}
+                for _,ch in ipairs(Scroll:GetChildren()) do if ch:IsA("TextButton") then ch:Destroy() end end
+                for _,v in ipairs(type(valuesList)=="table" and valuesList or {}) do
+                    if not seen[v] then
+                    seen[v]=true
+                    table.insert(values,v) local O=Instance.new("TextButton") local OC=Instance.new("UICorner")
+                    O.Parent=Scroll O.BackgroundColor3=Color3.fromRGB(15,15,15) O.BorderSizePixel=0 O.Size=UDim2.new(1,0,0,24) O.AutoButtonColor=false O.Font=Enum.Font.GothamSemibold O.Text=tostring(v) O.TextColor3=Color3.new(1,1,1) O.TextSize=10 O.ZIndex=102
+                    optionButtons[v]=O
+                    OC.CornerRadius=UDim.new(0,6) OC.Parent=O visual(O,v)
+                    O.MouseEnter:Connect(function() if not ((multi and selections[v]) or selected==v) then O.BackgroundColor3=Color3.fromRGB(10,10,10) end end)
+                    O.MouseLeave:Connect(function() visual(O,v) end)
+                    O.MouseButton1Click:Connect(function()
+                        if multi then
+                            selections[v]=not selections[v]
+                            refreshVisuals()
+                            pcall(callback,get())
+                        else set(v,true) close() end
+                    end)
+                    end
+                end
+                set(multi and selections or selected,false)
+                canvas()
+            end
+            build(list)
+            Layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(canvas)
+            local def=o and o.Default or nil
+            if def~=nil then set(def,false) elseif scrollsize and tonumber(scrollsize) and values[tonumber(scrollsize)] then set(values[tonumber(scrollsize)],false) end
+            RegisterElement(H,name,"Dropdown")
+            RegisterConfig(name,"Dropdown",function()
+                if multi then
+                    local selectedValues={}
+                    for _,v in ipairs(values) do if selections[v] then table.insert(selectedValues,v) end end
+                    return {__type="DropdownMulti",Values=selectedValues}
+                end
+                local v=get() if v==nil then return false end return v
+            end,function(v)
+                if type(v)=="table" and v.__type=="DropdownMulti" then v=v.Values end
+                set(v,true)
+            end)
+            return {Object=H,Refresh=function(newList) build(newList or {}) end,Get=function() return get() end,Set=function(v) set(v,true) end}
+        end
+        function Elements:addKeybind(name,default,callback)
+            local o=type(default)=="table" and default or nil
+            if o then name=o.Text or name default=o.Default callback=o.Callback end
+            callback=callback or function() end
+            local H=Instance.new("Frame") local C=Instance.new("UICorner") local T=Instance.new("TextLabel") local B=Instance.new("TextButton")
+            local function ControlConnect(signal,callback)
+                return Connect(signal,callback,H)
+            end
+            H.Parent=Home H.BackgroundColor3=Color3.fromRGB(17,17,17) H.BorderSizePixel=0 SetRowHeight(H,30) C.CornerRadius=UDim.new(0,5) C.Parent=H
+            T.Parent=H T.BackgroundTransparency=1 T.Position=UDim2.new(0,7.296,0,3) T.Size=UDim2.new(1,-104,0,24) T.TextTruncate=Enum.TextTruncate.AtEnd T.Font=Enum.Font.GothamSemibold T.Text=name or "" T.TextColor3=Color3.new(1,1,1) T.TextSize=11 T.TextXAlignment=Enum.TextXAlignment.Left
+            B.Parent=H B.BackgroundColor3=Color3.fromRGB(5,5,5) B.Position=UDim2.new(1,-91.2,0,5) B.Size=UDim2.new(0,85,0,20) B.Font=Enum.Font.GothamSemibold B.Text=default and tostring(default.Name or default) or "None" B.TextColor3=Color3.new(1,1,1) B.TextSize=9
+            local function normalizeBind(v)
+                if typeof(v)=="EnumItem" and v.EnumType==Enum.KeyCode and v~=Enum.KeyCode.Unknown then return v end
+                if type(v)=="string" then
+                    local ok,k=pcall(function() return Enum.KeyCode[v] end)
+                    if ok and k and k~=Enum.KeyCode.Unknown then return k end
+                end
+                return nil
+            end
+            local value=normalizeBind(default) local listening=false
+            B.Text=value and value.Name or "None"
+            H.Destroying:Once(function() if BindCapture==B then BindCapture=nil end end)
+            local function setBind(v)
+                value=normalizeBind(v)
+                listening=false
+                if BindCapture==B then BindCapture=nil end
+                B.Text=value and value.Name or "None"
+                pcall(callback,value)
+            end
+            B.MouseButton1Click:Connect(function() listening=true BindCapture=B B.Text="Press key..." end)
+            ControlConnect(UIS.InputBegan,function(i,g) if listening and BindCapture==B and i.UserInputType==Enum.UserInputType.Keyboard then if i.KeyCode==Enum.KeyCode.Escape or i.KeyCode==Enum.KeyCode.Backspace then setBind(nil) else setBind(i.KeyCode) end end end)
+            RegisterElement(H,name,"Keybind")
+            RegisterConfig(name,"Keybind",function() return value and value.Name or false end,setBind)
+            return {Object=H,Get=function() return value end,Set=setBind}
+        end
+        function Elements:addColorPicker(name,default,callback)
+            local o=type(default)=="table" and default or nil
+            if o then name=o.Text or name default=o.Default callback=o.Callback end
+            callback=callback or function() end
+            default=typeof(default)=="Color3" and default or Color3.new(1,1,1)
+            local H=Instance.new("Frame") local C=Instance.new("UICorner") local T=Instance.new("TextLabel") local B=Instance.new("TextButton") local BC=Instance.new("UICorner")
+            local function ControlConnect(signal,callback)
+                return Connect(signal,callback,H)
+            end
+            H.Parent=Home H.BackgroundColor3=Color3.fromRGB(17,17,17) H.BorderSizePixel=0 SetRowHeight(H,30) H.ClipsDescendants=false C.CornerRadius=UDim.new(0,5) C.Parent=H
+            T.Parent=H T.BackgroundTransparency=1 T.Position=UDim2.new(0,7.296,0,3) T.Size=UDim2.new(1,-74,0,24) T.TextTruncate=Enum.TextTruncate.AtEnd T.Font=Enum.Font.GothamSemibold T.Text=name or "" T.TextColor3=Color3.new(1,1,1) T.TextSize=11 T.TextXAlignment=Enum.TextXAlignment.Left
+            B.Parent=H B.BackgroundColor3=default B.Position=UDim2.new(1,-54.72,0,5) B.Size=UDim2.new(0,45,0,20) B.Text="" B.AutoButtonColor=false B.ZIndex=50 BC.CornerRadius=UDim.new(0,5) BC.Parent=B
+            local Panel=Instance.new("Frame") local PC=Instance.new("UICorner") local Canvas=Instance.new("ImageButton") local Circle=Instance.new("Frame") local CC=Instance.new("UICorner")
+            H.Destroying:Once(function() Panel:Destroy() end)
+            Panel.Parent=Gui Panel.BackgroundColor3=Color3.fromRGB(25,25,25) Panel.Size=UDim2.new(0,296,0,115) Panel.Visible=false Panel.BorderSizePixel=0 Panel.Active=true Panel.ZIndex=300
+            PC.CornerRadius=UDim.new(0,6) PC.Parent=Panel
+            Canvas.Parent=Panel Canvas.BackgroundTransparency=1 Canvas.Position=UDim2.new(0,8,0,8) Canvas.Size=UDim2.new(1,-16,1,-16) Canvas.Image="rbxassetid://143332548" Canvas.ZIndex=301 Canvas.AutoButtonColor=false
+            Circle.Parent=Canvas Circle.AnchorPoint=Vector2.new(.5,.5) Circle.BackgroundColor3=default Circle.BorderColor3=Color3.new(0,0,0) Circle.BorderSizePixel=2 Circle.Size=UDim2.new(0,10,0,10) Circle.ZIndex=302 Circle.Position=UDim2.new(.5,0,.5,0)
+            CC.CornerRadius=UDim.new(1,0) CC.Parent=Circle
+            local value=default local open=false local dragging=false local pickerInput=nil
+            local function positionPicker()
+                local p=B.AbsolutePosition-Gui.AbsolutePosition local x=p.X-120 local y=p.Y+B.AbsoluteSize.Y+4 local vp=Gui.AbsoluteSize
+                Panel.Position=UDim2.fromOffset(math.clamp(x,4,math.max(4,vp.X-300)),math.clamp(y,4,math.max(4,vp.Y-120)))
+            end
+            TrackPicker(B,Panel,H,function()
+                open=false
+                dragging=false
+                pickerInput=nil
+            end)
+            local function setColor(i)
+                local s=Canvas.AbsoluteSize local p=Canvas.AbsolutePosition
+                if s.X<=0 or s.Y<=0 then return end
+                local x=math.clamp((i.Position.X-p.X)/s.X,0,1) local y=math.clamp((i.Position.Y-p.Y)/s.Y,0,1)
+                value=Color3.fromHSV(x,1-y,1) Circle.Position=UDim2.new(x,0,y,0) Circle.BackgroundColor3=value B.BackgroundColor3=value pcall(callback,value)
+            end
+B.MouseButton1Click:Connect(function() open=not open if open then positionPicker() Panel.Visible=true Circle.BackgroundColor3=value else Panel.Visible=false end end)
+Canvas.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true pickerInput=i setColor(i) end end)
+ControlConnect(UIS.InputChanged,function(i) if dragging and pickerInput and ((pickerInput.UserInputType==Enum.UserInputType.MouseButton1 and i.UserInputType==Enum.UserInputType.MouseMovement) or i==pickerInput) then setColor(i) end end)
+ControlConnect(UIS.InputEnded,function(i) if i==pickerInput then dragging=false pickerInput=nil end end)
+            RegisterElement(H,name,"ColorPicker")
+            RegisterConfig(name,"ColorPicker",function() return {R=value.R,G=value.G,B=value.B} end,function(v)
+                local color=typeof(v)=="Color3" and v or (type(v)=="table" and TableToColor({__type="Color3",R=v.R,G=v.G,B=v.B}))
+                if color then value=color B.BackgroundColor3=value Circle.BackgroundColor3=value pcall(callback,value) end
+            end)
+            return {Object=H,Get=function() return value end,Set=function(v) if typeof(v)=="Color3" then value=v B.BackgroundColor3=v Circle.BackgroundColor3=v pcall(callback,v) end end}
+        end
+        task.defer(UpdateCanvas)
+        UpdateWindowLayout()
+        Elements.AddLabel=Elements.addLabel
+        Elements.AddButton=Elements.addButton
+        Elements.AddToggle=Elements.addToggle
+        Elements.AddSlider=Elements.addSlider
+        Elements.AddInput=Elements.addTextBox
+        Elements.AddDropdown=Elements.addDropdown
+        Elements.AddKeybind=Elements.addKeybind
+        Elements.AddColorPicker=Elements.addColorPicker
+        return Elements
+    end
+    --// CONFIG PAGE
+local ConfigPage=PageYep:addPage("Config", 6, false, 6)
+    ConfigPage.__Tab.LayoutOrder=9999
+    local CurrentConfig="Default"
+    local AutoLoad=false
+    local SettingsReady=false
+    local ConfigNameBox
+    local ConfigDropdown
+    local ConfigStatus
+    PersistSettings=function()
+        if not SettingsReady or not SetupFolder() then return end
+        pcall(function()
+            writefile(ConfigFolder.."/settings.json",HttpService:JSONEncode({Config=CurrentConfig,AutoLoad=AutoLoad}))
+        end)
+    end
+ConfigPage:addLabel("Configs", "Save, load and manage your configurations")
+    local _,InputBox=ConfigPage:addTextBox(
+        "",
+        "Name...",
+        function(v)
+            if tostring(v)~=""
+            and tostring(v):lower()~="name..." then
+                CurrentConfig=CleanName(v)
+                if PersistSettings then PersistSettings() end
+            end
+        end
+)
+    ConfigNameBox=InputBox
+    ConfigPage:addButton(
+        "Refresh",
+        function()
+            local files=GetConfigFiles()
+            if ConfigDropdown then ConfigDropdown.Refresh(files) end
+            if #files==0 then
+                ConfigStatus.Text="No configs found"
+                ConfigStatus.TextColor3=
+                    Color3.fromRGB(140,140,140)
+            else
+                ConfigStatus.Text=
+                    "Found "
+                    ..#files
+                    .." config"
+                    ..(#files==1 and "" or "s")
+                ConfigStatus.TextColor3=
+                    Color3.fromRGB(137,246,255)
+            end
+        end
+)
+    ConfigDropdown=ConfigPage:addDropdown(
+        "",
+        {},
+        5,
+        function(v)
+            CurrentConfig=CleanName(v)
+            if ConfigNameBox then ConfigNameBox.Text=CurrentConfig end
+            if PersistSettings then PersistSettings() end
+        end
+)
+    do
+        local H=Instance.new("Frame")
+        local C=Instance.new("UICorner")
+        local T=Instance.new("TextLabel")
+        H.Parent=ConfigPage.__Page
+        H.BackgroundColor3=Color3.fromRGB(17,17,17)
+        H.BorderSizePixel=0
+        SetRowHeight(H,30)
+        C.CornerRadius=UDim.new(0,5)
+        C.Parent=H
+        T.Parent=H
+        T.BackgroundTransparency=1
+        T.Position=UDim2.new(0,7,0,0)
+        T.Size=UDim2.new(1,-14,1,0)
+        T.Font=Enum.Font.GothamSemibold
+        T.Text="Loaded: None"
+        T.TextColor3=Color3.fromRGB(140,140,140)
+        T.TextSize=9
+        T.TextXAlignment=Enum.TextXAlignment.Left
+        ConfigStatus=T
+    end
+    local function SetStatus(text,good)
+        if not ConfigStatus then return end
+        ConfigStatus.Text=text
+        ConfigStatus.TextColor3=
+            good
+            and Color3.fromRGB(137,246,255)
+            or Color3.fromRGB(255,120,120)
+    end
+    local function SaveConfig(name)
+        if not SetupFolder() then
+            SetStatus("Filesystem unavailable",false)
+            return false
+        end
+        name=CleanName(name)
+        if name:lower()=="settings" then SetStatus("Reserved config name",false) return false end
+        local data={
+            Version=6,
+            ConfigName=name,
+            Values={},
+            Plugins=LoadedConfigData and type(LoadedConfigData.Plugins)=="table" and Clone(LoadedConfigData.Plugins) or {}
+        }
+        for _,entry in ipairs(ConfigEntries) do
+            local ok,value=pcall(entry.Get)
+            if ok then
+                if typeof(value)=="Color3" then value=ColorToTable(value) end
+                data.Values[entry.Key]={
+                    Type=entry.Type,
+                    Value=value
+                }
+            end
+        end
+        for _,entry in ipairs(PluginConfigEntries) do
+            if entry.Plugin then
+                local pluginName=entry.Plugin.File
+                data.Plugins[pluginName]=
+                    data.Plugins[pluginName]
+                    or {
+                        File=entry.Plugin.File,
+                        Values={}
+                    }
+                local ok,value=pcall(entry.Get)
+                if ok then
+                    if typeof(value)=="Color3" then value=ColorToTable(value) end
+                    data.Plugins[pluginName].Values[
+                        entry.Key
+                    ]={
+                        Type=entry.Type,
+                        Value=value
+                    }
+                end
+            end
+        end
+local ok,json=pcall(function() return HttpService:JSONEncode(data) end)
+        if not ok then
+            SetStatus("Failed to encode config",false)
+            return false
+        end
+local success=pcall(function() writefile(ConfigPath(name), json) end)
+        if not success then
+            SetStatus("Failed to save",false)
+            return false
+        end
+        CurrentConfig=name
+        if ConfigNameBox then ConfigNameBox.Text=name end
+        PersistSettings()
+SetStatus("Saved: "..name, true)
+        return true
+    end
+    local function LoadConfig(name)
+        if not SetupFolder() then
+            SetStatus("Filesystem unavailable",false)
+            return false
+        end
+        name=CleanName(name)
+        local path=ConfigPath(name)
+        if name:lower()=="settings" then SetStatus("Reserved config name",false) return false end
+        if not FileExists(path) then
+SetStatus("Not found: "..name, false)
+            return false
+        end
+local ok,contents=pcall(function() return readfile(path) end)
+        if not ok or not contents then
+SetStatus("Failed to read", false)
+            return false
+        end
+local decodedOk,data=pcall(function() return HttpService:JSONDecode(contents) end)
+        if not decodedOk
+        or type(data)~="table"
+        or type(data.Values)~="table" then
+SetStatus("Invalid config", false)
+            return false
+        end
+        local failures=0
+        local function apply(entries,values)
+            for _,entry in ipairs(entries) do
+                local saved=values[entry.Key] or values[entry.Name]
+                if saved~=nil then
+                    local valid=type(saved)=="table" and (saved.Type==nil or saved.Type==entry.Type) and saved.Value~=nil
+                    if valid and entry.Type=="Slider" then
+                        valid=type(saved.Value)=="number" and saved.Value==saved.Value and math.abs(saved.Value)~=math.huge
+                    elseif valid and entry.Type=="Toggle" then
+                        valid=type(saved.Value)=="table" or type(saved.Value)=="boolean"
+                    elseif valid and (entry.Type=="Color3" or entry.Type=="ColorPicker") then
+                        local v=saved.Value
+                        valid=typeof(v)=="Color3" or (type(v)=="table" and type(v.R)=="number" and type(v.G)=="number" and type(v.B)=="number")
+                    end
+                    if not valid or not pcall(entry.Set,Clone(saved.Value)) then failures+=1 end
+                end
+            end
+        end
+        apply(ConfigEntries,data.Values)
+        if type(data.Plugins)=="table" then
+            for _,entry in ipairs(PluginConfigEntries) do
+                local pluginData=data.Plugins[entry.Plugin.File] or data.Plugins[entry.Plugin.Name]
+                if type(pluginData)=="table" and type(pluginData.Values)=="table" then apply({entry},pluginData.Values) end
+            end
+        end
+        LoadedConfigData=data
+        if failures>0 then SetStatus("Config partially loaded: "..failures.." failed",false) return false end
+        CurrentConfig=name
+        if ConfigNameBox then ConfigNameBox.Text=name end
+        PersistSettings()
+SetStatus("Loaded: "..name, true)
+        return true
+    end
+    local function DeleteConfig(name)
+        if not SetupFolder() then
+SetStatus("Filesystem unavailable", false)
+            return false
+        end
+        name=CleanName(name)
+        local path=ConfigPath(name)
+        if name:lower()=="settings" then SetStatus("Reserved config name",false) return false end
+        if not FileExists(path) then
+SetStatus("Not found: "..name, false)
+            return false
+        end
+        if type(delfile)~="function" then
+SetStatus("Delete unsupported", false)
+            return false
+        end
+local ok=pcall(function() delfile(path) end)
+        if not ok then
+SetStatus("Failed to delete", false)
+            return false
+        end
+        if ConfigDropdown then ConfigDropdown.Refresh(GetConfigFiles()) end
+SetStatus("Deleted: "..name, true)
+        return true
+    end
+    ConfigPage:addButton(
+        "Load",
+        function()
+            local name=
+                ConfigNameBox
+                and ConfigNameBox.Text
+                or CurrentConfig
+            if tostring(name):lower()=="name..."
+            or tostring(name)=="" then
+                name=CurrentConfig
+            end
+            LoadConfig(name)
+        end
+)
+    ConfigPage:addButton(
+        "Save",
+        function()
+            local name=
+                ConfigNameBox
+                and ConfigNameBox.Text
+                or CurrentConfig
+            if tostring(name):lower()=="name..."
+            or tostring(name)=="" then
+                name=CurrentConfig
+            end
+            SaveConfig(name)
+            if ConfigDropdown then
+ConfigDropdown.Refresh(GetConfigFiles())
+                ConfigDropdown.Set(name)
+            end
+        end
+)
+    ConfigPage:addToggle(
+        "Auto Load",
+        false,
+        function(v)
+            AutoLoad=v
+            if not SettingsReady or not SetupFolder() then return end
+            local name=
+                ConfigNameBox
+                and ConfigNameBox.Text
+                or CurrentConfig
+            if tostring(name):lower()=="name..."
+            or tostring(name)=="" then
+                name=CurrentConfig
+            end
+            local settings={
+                Config=CleanName(name),
+                AutoLoad=v
+            }
+pcall(function() writefile(ConfigFolder.."/settings.json", HttpService:JSONEncode(settings)) end)
+        end
+)
+    ConfigPage:addButton(
+        "Delete",
+        function()
+            local name=
+                ConfigNameBox
+                and ConfigNameBox.Text
+                or CurrentConfig
+            if tostring(name):lower()=="name..."
+            or tostring(name)=="" then
+                name=CurrentConfig
+            end
+            DeleteConfig(name)
+        end
+)
+    local function ResetAll()
+        for _,entry in ipairs(ResetEntries) do
+            local resetValue=Clone(entry.Default)
+            if entry.Type=="Toggle" and type(resetValue)=="table" then resetValue.Enabled=false resetValue.Active=false end
+            if resetValue~=nil then
+                pcall(entry.Set,resetValue)
+            elseif entry.Type=="Dropdown" then
+                pcall(entry.Set,nil)
+            end
+        end
+        AutoLoad=false
+        if AutoLoadSetter then pcall(AutoLoadSetter,false) end
+        LoadedConfigData=nil
+        PerformanceMode=false
+        UIScaleValue=1.1
+        Scale.Scale=UIScaleValue
+        CurrentConfig="Default"
+        if ConfigNameBox then ConfigNameBox.Text="Name..." end
+        SearchBox.Text=""
+        ClearHighlight()
+        pcall(function() writefile(ConfigFolder.."/settings.json",HttpService:JSONEncode({Config="Default",AutoLoad=false})) end)
+        UpdateTogglePanel()
+        UpdateWindowLayout()
+    end
+    ResetButton.MouseButton1Click:Connect(ResetAll)
+    --// PLUGIN SECTION
+ConfigPage:addLabel("Plugins", "Load Lua plugins from Skido/skido_plugin")
+local PluginDropdown
+local PluginStatus
+local function RefreshPluginDropdown()
+    local files=GetPluginFiles()
+    if PluginDropdown then PluginDropdown.Refresh(files) end
+    if PluginStatus then
+        if #files==0 then
+            PluginStatus.Text="No .lua plugins found"
+            PluginStatus.TextColor3=Color3.fromRGB(140,140,140)
+        else
+            PluginStatus.Text=
+                "Found "
+                ..#files
+                .." plugin"
+                ..(#files==1 and "" or "s")
+            PluginStatus.TextColor3=
+                Color3.fromRGB(137,246,255)
+        end
+    end
+end
+PluginDropdown=ConfigPage:addDropdown(
+    "",
+    {},
+    6,
+    function()
+    end
+)
+ConfigPage:addButton("Refresh Plugins", function() RefreshPluginDropdown() end)
+do
+    local H=Instance.new("Frame")
+    local C=Instance.new("UICorner")
+    local T=Instance.new("TextLabel")
+    H.Parent=ConfigPage.__Page
+    H.BackgroundColor3=Color3.fromRGB(17,17,17)
+    H.BorderSizePixel=0
+    SetRowHeight(H,30)
+    C.CornerRadius=UDim.new(0,5)
+    C.Parent=H
+    T.Parent=H
+    T.BackgroundTransparency=1
+    T.Position=UDim2.new(0,7,0,0)
+    T.Size=UDim2.new(1,-14,1,0)
+    T.Font=Enum.Font.GothamSemibold
+    T.Text="Plugin loader ready"
+    T.TextColor3=Color3.fromRGB(140,140,140)
+    T.TextSize=9
+    T.TextXAlignment=Enum.TextXAlignment.Left
+    T.TextWrapped=true
+    PluginStatus=T
+end
+--// PLUGIN EXECUTION
+local function ResolvePluginResult(result)
+    local current=result
+    for i=1,8 do
+        if type(current)=="table" then
+            if type(current.Tabs)=="table" then return current end
+            if type(current.Plugin)=="table" then
+                current=current.Plugin
+            elseif type(current.Data)=="table" then
+                current=current.Data
+            elseif type(current.Module)=="table" then
+                current=current.Module
+            else
+                return nil,"Plugin did not return a valid plugin table"
+            end
+        elseif type(current)=="function" then
+            local ok,nextResult=pcall(current)
+            if not ok then return nil,tostring(nextResult) end
+            current=nextResult
+        else
+            return nil,"Plugin returned "..type(current)
+        end
+    end
+    return nil,"Plugin wrapper depth exceeded"
+end
+local function ExecutePluginSource(source,fileName)
+    if type(loadstring)~="function" then return nil,"loadstring unavailable" end
+local ok,chunk,compileError=pcall(function() return loadstring(source, "@"..tostring(fileName)) end)
+    if not ok or type(chunk)~="function" then return nil,tostring(compileError or chunk) end
+    local okRun,result=pcall(chunk)
+    if not okRun then return nil,tostring(result) end
+    return ResolvePluginResult(result)
+end
+--// PLUGIN LOADER
+local function LoadPlugin(path)
+    if type(path)~="string" or path=="" then
+        if PluginStatus then
+            PluginStatus.Text="Select a plugin first"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+    local fileKey=tostring(path):gsub("\\","/"):gsub("/+","/"):gsub("^%./","")
+    if LoadedPlugins[fileKey] or PluginLoading[fileKey] then
+        if PluginStatus then
+            PluginStatus.Text="Already loaded: "..PluginFileName(fileKey)
+            PluginStatus.TextColor3=Color3.fromRGB(255,190,90)
+        end
+        return false
+    end
+    if not FileExists(fileKey) then
+        if PluginStatus then
+            PluginStatus.Text="Plugin file not found"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+    if type(readfile)~="function" then
+        if PluginStatus then
+            PluginStatus.Text="readfile unavailable"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+    if type(loadstring)~="function" then
+        if PluginStatus then
+            PluginStatus.Text="loadstring unavailable"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+local okRead,source=pcall(function() return readfile(fileKey) end)
+    if not okRead or type(source)~="string" or source=="" then
+        if PluginStatus then
+            PluginStatus.Text="Failed to read plugin"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+PluginLoading[fileKey]=true
+local executeOk,plugin,err=pcall(ExecutePluginSource,source,PluginFileName(fileKey))
+PluginLoading[fileKey]=nil
+if not executeOk then err=plugin plugin=nil end
+    if not plugin then
+        if PluginStatus then
+            PluginStatus.Text="Plugin error: "..tostring(err)
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+    if type(plugin.Tabs)~="table" then
+        if PluginStatus then
+            PluginStatus.Text="Plugin has no Tabs table"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+local pluginName=tostring(plugin.Name or PluginFileName(fileKey))
+    local pluginInfo={
+        Name=pluginName,
+        File=fileKey,
+        Plugin=plugin,
+        Tabs={},
+        Entries={}
+    }
+    LoadedPlugins[fileKey]=pluginInfo
+    local previousPlugin=CurrentPlugin
+    CurrentPlugin=pluginInfo
+    local createdTabs=0
+    local errors={}
+    for _,tabInfo in ipairs(plugin.Tabs) do
+        if type(tabInfo)=="table"
+        and type(tabInfo.Name)=="string" then
+            local requestedName=tostring(tabInfo.Name)
+            if requestedName:lower()~="config"
+            and not PageTabs[requestedName] then
+local pageOk,page=pcall(function() return PageYep:addPage(requestedName, tabInfo.ScrollSize or 6, false, tabInfo.ElementSpacing or 6) end)
+                if pageOk and page then
+table.insert(pluginInfo.Tabs, page)
+                    createdTabs+=1
+                    if type(tabInfo.Elements)=="function" then
+local success,elementErr=pcall(tabInfo.Elements, page, plugin)
+                        if not success then table.insert(errors, requestedName..": "..tostring(elementErr)) end
+                    end
+                else
+table.insert(errors, requestedName..": "..tostring(page))
+                end
+            end
+        end
+    end
+    CurrentPlugin=previousPlugin
+    UpdateWindowLayout()
+    if createdTabs==0 then
+        LoadedPlugins[fileKey]=nil
+        if PluginStatus then
+            PluginStatus.Text="Plugin created no tabs"
+            PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+        end
+        return false
+    end
+    if LoadedConfigData and type(LoadedConfigData.Plugins)=="table" then
+        local savedPlugin=LoadedConfigData.Plugins[fileKey] or LoadedConfigData.Plugins[pluginName]
+        if type(savedPlugin)=="table" and type(savedPlugin.Values)=="table" then
+            for _,entry in ipairs(PluginConfigEntries) do
+                if entry.Plugin==pluginInfo then
+                    local saved=savedPlugin.Values[entry.Key] or savedPlugin.Values[entry.Name]
+                    if type(saved)=="table" and (saved.Type==nil or saved.Type==entry.Type) and saved.Value~=nil then
+                        if not pcall(entry.Set,Clone(saved.Value)) then table.insert(errors,"Failed setting: "..entry.Name) end
+                    end
+                end
+            end
+        end
+    end
+    if pluginInfo.Tabs[1] then pluginInfo.Tabs[1].__Show() end
+    if PluginStatus then
+        if #errors>0 then
+            PluginStatus.Text=
+                "Loaded: "
+                ..pluginName
+                .." ("
+                ..createdTabs
+                .." tab"
+                ..(createdTabs==1 and "" or "s")
+                ..", "
+                ..#errors
+                .." error"
+                ..(#errors==1 and "" or "s")
+                ..")"
+        else
+            PluginStatus.Text=
+                "Loaded: "
+                ..pluginName
+.." (" ..createdTabs .." tab" ..(createdTabs==1 and "" or "s") ..")"
+        end
+        PluginStatus.TextColor3=Color3.fromRGB(137,246,255)
+    end
+    return true
+end
+--// UI SETTINGS
+ConfigPage:addLabel("Interface", "Scale and performance controls")
+ConfigPage:addSlider(
+    "UI Scale",
+    80,
+    130,
+    function(v)
+        UIScaleValue=v/100
+        Scale.Scale=UIScaleValue
+    end,
+    110
+)
+ConfigPage:addToggle(
+    "Performance Mode",
+    false,
+    function(v)
+        PerformanceMode=v==true
+        for _,page in ipairs(Folder:GetChildren()) do
+            if page:IsA("ScrollingFrame") then page.ScrollBarThickness=PerformanceMode and 2 or 4 end
+        end
+        if PerformanceMode then UpdateWindowLayout() end
+    end
+)
+ConfigPage:addButton(
+    "Load Plugin",
+    function()
+        local selected=
+            PluginDropdown
+            and PluginDropdown.Get()
+        if not selected then
+            if PluginStatus then
+                PluginStatus.Text="Select a plugin first"
+                PluginStatus.TextColor3=Color3.fromRGB(255,120,120)
+            end
+            return
+        end
+        LoadPlugin(tostring(selected))
+    end
+)
+--// INITIAL SETTINGS
+task.spawn(function()
+    if not SetupFolder() then return end
+    local settingsPath=ConfigFolder.."/settings.json"
+    if FileExists(settingsPath) then
+local ok,contents=pcall(function() return readfile(settingsPath) end)
+        if ok and contents then
+local decodedOk,data=pcall(function() return HttpService:JSONDecode(contents) end)
+            if decodedOk and type(data)=="table" then
+                if type(data.Config)=="string"
+                and data.Config~="" then
+                    CurrentConfig=CleanName(data.Config)
+                end
+                AutoLoad=data.AutoLoad==true
+                if ConfigNameBox then ConfigNameBox.Text=CurrentConfig end
+            end
+        end
+    end
+    if AutoLoadSetter then pcall(AutoLoadSetter,AutoLoad) end
+    SettingsReady=true
+    task.wait(.15)
+    if not alive then return end
+    if ConfigDropdown then ConfigDropdown.Refresh(GetConfigFiles()) end
+    if PluginDropdown then RefreshPluginDropdown() end
+    if AutoLoad then
+        task.wait(.25)
+        if not alive then return end
+        LoadConfig(CurrentConfig)
+    end
+end)
+task.defer(function()
+    task.wait(.1)
+    if not alive then return end
+    UpdateTogglePanel()
+    UpdateWindowLayout()
+end)
+PageYep.Destroy=function() Gui:Destroy() end
+PageYep.SaveConfig=function(_,name) return SaveConfig(name or CurrentConfig) end
+PageYep.LoadConfig=function(_,name) return LoadConfig(name or CurrentConfig) end
+PageYep.Reset=ResetAll
+PageYep.LoadPlugin=function(_,path) return LoadPlugin(path) end
+return PageYep
+end
+return Library
