@@ -1994,7 +1994,25 @@ UDim2.new(armed and .46 or .1, 0, 0, 4),
                     UpdateSwitchVisual()
                 end
 )
-            return H
+            local function SetValue(v, callCallback)
+                v = v == true
+                local previous = active
+                armed = v
+                active = v
+                if not armed and closePicker then closePicker() end
+                UpdateRightRow()
+                UpdateSwitchVisual()
+                if callCallback ~= false and previous ~= active then
+                    pcall(callback, active)
+                end
+                task.defer(UpdateCanvas)
+            end
+            return {
+                Object = H,
+                Get = function() return active end,
+                Set = SetValue,
+                SetValue = SetValue
+            }
         end
         --// SLIDER
         function Elements:addSlider(name,a,b,c,d)
